@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  test-cli:
+    name: Test CLI
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Check code formatting
+        run: cargo fmt --check --manifest-path cli/Cargo.toml
+
+      - name: Run clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --workspace --verbose
+
+  validate-spec:
+    name: Validate Specification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Verify Spec Structure
+        run: |
+          test -f spec/VERSION
+          test -f spec/.manifest.json
+          test -f spec/directives.snippet
+          test -d spec/core
+          test -d spec/profiles
+          echo "Specification assets successfully verified."

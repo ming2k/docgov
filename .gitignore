@@ -1,0 +1,30 @@
+# Rust / Cargo
+/target/
+Cargo.lock.backup
+
+# Build & Dist
+dist/
+build/
+*.tar.gz
+*.tar.gz.sha256
+*.zip
+*.zip.sha256
+
+# Docgov runtime & caches
+.docgov/cache/
+
+# Python / Scripts
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.venv
+
+# System & Editors
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.tmp

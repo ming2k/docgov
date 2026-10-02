@@ -1,0 +1,79 @@
+name: Release Specification
+
+on:
+  push:
+    tags:
+      - "spec-v*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: "Spec tag to release (e.g. spec-v0.0.1)"
+        required: false
+        default: "spec-v0.0.1"
+
+permissions:
+  contents: write
+
+jobs:
+  release-spec:
+    name: Package and Publish Specification Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Specification Tarball Bundles
+        run: |
+          if [ -n "${{ github.event.inputs.tag_name }}" ]; then
+            REF_NAME="${{ github.event.inputs.tag_name }}"
+          else
+            REF_NAME="${GITHUB_REF_NAME}"
+          fi
+          # Extract clean version, e.g. spec-v0.0.1 -> 0.0.1
+          CLEAN_VER="${REF_NAME#spec-v}"
+          CLEAN_VER="${CLEAN_VER#spec-}"
+          CLEAN_VER="${CLEAN_VER#v}"
+          echo "Building specification release for tag ${REF_NAME} (clean version: ${CLEAN_VER})"
+
+          mkdir -p dist
+
+          # Package spec directory contents
+          cd spec
+          tar --exclude='./.git' \
+              --exclude='./.github' \
+              -czf "../dist/docgov-spec-${CLEAN_VER}.tar.gz" .
+          tar --exclude='./.git' \
+              --exclude='./.github' \
+              -czf "../dist/dog-spec-${CLEAN_VER}.tar.gz" .
+          cd ..
+
+          # Also create canonical docgov-assets.tar.gz for backwards compatibility
+          cp "dist/docgov-spec-${CLEAN_VER}.tar.gz" "dist/docgov-assets.tar.gz"
+
+          # Copy standalone directives snippet
+          cp spec/directives.snippet dist/directives.snippet
+
+          # Generate SHA-256 checksums
+          cd dist
+          sha256sum "docgov-spec-${CLEAN_VER}.tar.gz" > "docgov-spec-${CLEAN_VER}.tar.gz.sha256"
+          sha256sum "dog-spec-${CLEAN_VER}.tar.gz" > "dog-spec-${CLEAN_VER}.tar.gz.sha256"
+          sha256sum docgov-assets.tar.gz > docgov-assets.tar.gz.sha256
+          cd ..
+
+          ls -la dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
+          files: |
+            dist/docgov-spec-*.tar.gz
+            dist/docgov-spec-*.tar.gz.sha256
+            dist/dog-spec-*.tar.gz
+            dist/dog-spec-*.tar.gz.sha256
+            dist/docgov-assets.tar.gz
+            dist/docgov-assets.tar.gz.sha256
+            dist/directives.snippet
+          draft: false
+          prerelease: false
+          generate_release_notes: true

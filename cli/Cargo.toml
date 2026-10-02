@@ -1,0 +1,30 @@
+[package]
+name = "docgov"
+version = "0.0.1"
+edition = "2021"
+default-run = "docgov"
+description = "High-performance, zero-vendoring documentation and architecture governance linter"
+license = "MIT"
+authors = ["ming2k <ming2k@users.noreply.github.com>"]
+homepage = "https://github.com/ming2k/docgov"
+repository = "https://github.com/ming2k/docgov"
+
+[dependencies]
+clap = { version = "4.5", features = ["derive", "cargo"] }
+pulldown-cmark = "0.13"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+serde_yaml = "0.9"
+glob = "0.3"
+walkdir = "2.5"
+colored = "2.1"
+anyhow = "1.0"
+ureq = "2.10"
+sha2 = "0.10"
+hex = "0.4"
+flate2 = "1.0"
+tar = "0.4"
+dirs = "7.0.0"
+
+[dev-dependencies]
+tempfile = "3.17"

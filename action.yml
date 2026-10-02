@@ -1,0 +1,50 @@
+name: "docgov Documentation Governance Action"
+description: "Zero-vendoring, compiler-grade documentation and system invariant verification"
+author: "docgov maintainers"
+branding:
+  icon: "check-circle"
+  color: "blue"
+
+inputs:
+  version:
+    description: "Version of docgov to use (default: latest)"
+    required: false
+    default: "latest"
+  command:
+    description: "Command to execute (e.g. 'check', 'diff')"
+    required: false
+    default: "check"
+  args:
+    description: "Additional arguments to pass to docgov (default: '--format=github')"
+    required: false
+    default: "--format=github"
+  path:
+    description: "Target workspace path to verify"
+    required: false
+    default: "."
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up docgov binary
+      shell: bash
+      run: |
+        INSTALL_DIR="${RUNNER_TEMP}/docgov_bin"
+        mkdir -p "${INSTALL_DIR}"
+        export DOCGOV_INSTALL_DIR="${INSTALL_DIR}"
+        export DOCGOV_VERSION="${{ inputs.version }}"
+        
+        # Check if local built binary exists in this action repository
+        if [ -x "${{ github.action_path }}/target/release/docgov" ]; then
+          cp "${{ github.action_path }}/target/release/docgov" "${INSTALL_DIR}/docgov"
+        else
+          # Download precompiled binary from release
+          "${{ github.action_path }}/install.sh"
+        fi
+        
+        echo "${INSTALL_DIR}" >> $GITHUB_PATH
+
+    - name: Run docgov
+      shell: bash
+      run: |
+        docgov ${{ inputs.command }} ${{ inputs.args }} --path ${{ inputs.path }}
