@@ -227,7 +227,7 @@ pub struct UpstreamConfig {
 }
 
 fn default_upstream_source() -> String {
-    "https://github.com/ming2k/docgov-spec".to_string()
+    "https://github.com/ming2k/docgov".to_string()
 }
 
 fn default_upstream_ref() -> String {

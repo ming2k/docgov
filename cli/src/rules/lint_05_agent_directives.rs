@@ -47,11 +47,23 @@ fn find_next_major_heading(text: &str) -> Option<usize> {
     None
 }
 
+/// Extract primary Markdown heading from the spec snippet (e.g. "## Documentation Governance Directives")
+pub fn extract_primary_heading(snippet: &str) -> Option<&str> {
+    for line in snippet.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with("## ") || trimmed.starts_with("# ") {
+            return Some(trimmed);
+        }
+    }
+    None
+}
+
 pub fn patch_agent_directives(
     existing_content: Option<&str>,
     snippet: &str,
 ) -> (String, PatchAction) {
     let snippet = snippet.trim();
+    let detected_heading = extract_primary_heading(snippet).unwrap_or("## Documentation Governance Directives");
 
     match existing_content {
         None => {
@@ -87,10 +99,8 @@ pub fn patch_agent_directives(
                 } else {
                     // Delimiter begin exists, but closing delimiter was stripped
                     let remaining = &text[begin_idx + DOCGOV_DIRECTIVES_BEGIN.len()..];
-                    let search_start = if let Some(h_idx) =
-                        remaining.find("## Documentation Governance Directives")
-                    {
-                        h_idx + "## Documentation Governance Directives".len()
+                    let search_start = if let Some(h_idx) = remaining.find(detected_heading) {
+                        h_idx + detected_heading.len()
                     } else {
                         0
                     };
@@ -117,17 +127,16 @@ pub fn patch_agent_directives(
             }
 
             // Case: Delimiters missing, but directive heading exists (AI stripped delimiters/reorganized)
-            let heading_marker = "## Documentation Governance Directives";
-            if let Some(head_idx) = text.find(heading_marker) {
-                let after_head = &text[head_idx + heading_marker.len()..];
+            if let Some(head_idx) = text.find(detected_heading) {
+                let after_head = &text[head_idx + detected_heading.len()..];
                 let end_idx = if let Some(end_rel) =
                     find_delimiter_line(after_head, DOCGOV_DIRECTIVES_END)
                         .or_else(|| after_head.find(DOCGOV_DIRECTIVES_END))
                 {
-                    head_idx + heading_marker.len() + end_rel + DOCGOV_DIRECTIVES_END.len()
+                    head_idx + detected_heading.len() + end_rel + DOCGOV_DIRECTIVES_END.len()
                 } else {
                     find_next_major_heading(after_head)
-                        .map(|offset| head_idx + heading_marker.len() + offset)
+                        .map(|offset| head_idx + detected_heading.len() + offset)
                         .unwrap_or(text.len())
                 };
 
@@ -252,14 +261,15 @@ impl Rule for AgentDirectivesRule {
                             rel_target,
                         )
                         .with_location(line_num, 1)
-                        .with_suggestion("Run `docgov fix` or `docgov init` to restore the delimiter comments."),
+                        .with_suggestion("Run `docgov update` or `docgov init` to restore the delimiter comments."),
                     );
                 }
                 _ => {
                     let line_num = content.lines().count().max(1);
-                    if content.contains("## Documentation Governance Directives")
-                        || content.contains(DOCGOV_DIRECTIVES_END)
-                    {
+                    let looks_corrupted = content.contains(DOCGOV_DIRECTIVES_END)
+                        || content.contains("Documentation Governance Directives")
+                        || content.contains("Machine Invariants (Pre-Submit Checklist)");
+                    if looks_corrupted {
                         diagnostics.push(
                             Diagnostic::error(
                                 self.id(),
@@ -270,7 +280,7 @@ impl Rule for AgentDirectivesRule {
                                 rel_target,
                             )
                             .with_location(line_num, 1)
-                            .with_suggestion("Run `docgov fix` or `docgov init` to restore the boundary comments."),
+                            .with_suggestion("Run `docgov update` or `docgov init` to restore the boundary comments."),
                         );
                     } else {
                         diagnostics.push(

@@ -52,12 +52,11 @@ https://github.com/${REPO}/releases/latest/download/docgov-${TARGET}.tar.gz
 https://github.com/${REPO}/releases/latest/download/dog-${TARGET}.tar.gz
 "
 else
-    # Normalize tag name: cli-v0.0.1 or v0.0.1
+    # Normalize tag name: e.g. 0.0.1 -> v0.0.1
     TAG="$VERSION"
     case "$TAG" in
-        cli-v*|cli-*) ;;
-        v*) TAG="cli-$TAG" ;;
-        *) TAG="cli-v$TAG" ;;
+        v*) ;;
+        *) TAG="v$TAG" ;;
     esac
     CANDIDATE_URLS="
 https://github.com/${REPO}/releases/download/${TAG}/docgov-${TARGET}.tar.gz

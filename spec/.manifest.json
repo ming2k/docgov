@@ -99,6 +99,12 @@
       "profile": "validation",
       "editable": false,
       "sha256": "1e6f2efcec81c9cfa4a2a9c36f05e666f32fddc4c5ed06ef3e97393275436cb6"
+    },
+    "default-config.yml": {
+      "role": "template",
+      "profile": "core",
+      "editable": false,
+      "sha256": "7cec37f50c3e6ace01958f88ec613c3687834de0baae0ada7b42b4082830ff35"
     }
   }
 }

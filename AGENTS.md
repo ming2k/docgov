@@ -18,7 +18,7 @@ The repository is structured as a monorepo:
 
 - **CLI Engine**: All engine source code resides in `cli/src/` with integration test suites in `cli/tests/`.
 - **Specification**: All governance specifications reside in `spec/`.
-- **Independent Versioning**: CLI uses `cli-vx.x.x` tags; Spec uses `spec-vx.x.x` tags.
+- **Independent Versioning**: CLI uses `vx.x.x` tags; Spec uses `spec-vx.x.x` tags.
 - **Verification**: Always run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` before completing tasks.
 
 <!-- BEGIN DOCGOV DIRECTIVES -->

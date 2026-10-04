@@ -658,54 +658,6 @@ fn test_baseline_generation_and_filtering() {
     assert_eq!(remaining_after[0].rule_id, "INV-LINT-01");
 }
 
-#[test]
-fn test_docgov_fix_frontmatter_synthesis() {
-    let dir = tempdir().unwrap();
-    let root = dir.path();
-
-    let adr_dir = root.join("docs/adr");
-    fs::create_dir_all(&adr_dir).unwrap();
-
-    // 1. Classic Michael Nygard / MADR ADR
-    fs::write(
-        adr_dir.join("0001-project-foundations.md"),
-        "# ADR-0001: Project foundations\n\n- Status: Accepted\n- Date: 2026-05-19\n\n## Context\nSome context.",
-    )
-    .unwrap();
-
-    // 2. Superseded ADR with pointer
-    fs::write(
-        adr_dir.join("0005-tessellator-scope.md"),
-        "# ADR-0005: Tessellator scope\n\n- Status: Superseded by ADR-0011\n- Date: 2026-05-20\n\n## Context\nTessellator details.",
-    )
-    .unwrap();
-
-    // Run fix
-    let summary = docgov::fix::run_fix(root, Some(&["INV-LINT-03".to_string()]), false).unwrap();
-    assert_eq!(summary.fixed.len(), 2);
-
-    // Now run lint - it should pass with 0 errors!
-    let engine = LintEngine::new(root).unwrap();
-    let diagnostics = engine.run_lint(None).unwrap();
-    let adr_errors: Vec<_> = diagnostics
-        .iter()
-        .filter(|d| d.rule_id == "INV-LINT-03")
-        .collect();
-    assert_eq!(
-        adr_errors.len(),
-        0,
-        "Fixed files must pass frontmatter linting cleanly! Found: {:?}",
-        adr_errors
-    );
-
-    // Inspect content of synthesized frontmatter
-    let content_0005 = fs::read_to_string(adr_dir.join("0005-tessellator-scope.md")).unwrap();
-    assert!(content_0005.contains("id: ADR-0005"));
-    assert!(content_0005.contains("status: superseded"));
-    assert!(content_0005.contains("superseded_by: \"ADR-0011\""));
-    assert!(content_0005.contains("# ADR-0005: Tessellator scope"));
-}
-
 // =========================================================================
 // `docgov update` — Spec Evolution & Upgrade Contract Tests
 // =========================================================================
@@ -716,7 +668,7 @@ fn test_patch_yaml_version_and_ref_non_invasive() {
 
 # Remote Upstream & Protocol Distribution
 upstream:
-  source: "https://github.com/ming2k/docgov-spec"
+  source: "https://github.com/ming2k/docgov"
   ref: "v0.0.7"
 
 # Canonical Governance Documentation Mirror (for Agent Context)
@@ -737,7 +689,7 @@ triggers:
     assert!(patched.contains("ref: \"v0.1.0\""));
 
     // Everything else must remain byte-for-byte untouched (non-invasive)
-    assert!(patched.contains("source: \"https://github.com/ming2k/docgov-spec\""));
+    assert!(patched.contains("source: \"https://github.com/ming2k/docgov\""));
     assert!(patched.contains("governance_docs:"));
     assert!(patched.contains("target_dir: \"docs/governance/documentation\""));
     assert!(patched.contains("watch: \"src/api/**\""));
@@ -763,15 +715,15 @@ fn test_canonicalize_upstream_source() {
     use docgov::remote::canonicalize_upstream_source;
 
     let (c1, m1) = canonicalize_upstream_source("https://github.com/ming2k/docs-governance");
-    assert_eq!(c1, "https://github.com/ming2k/docgov-spec");
+    assert_eq!(c1, "https://github.com/ming2k/docgov");
     assert!(m1);
 
-    let (c2, m2) = canonicalize_upstream_source("https://github.com/ming2k/docgov");
-    assert_eq!(c2, "https://github.com/ming2k/docgov-spec");
+    let (c2, m2) = canonicalize_upstream_source("https://github.com/ming2k/docgov-spec");
+    assert_eq!(c2, "https://github.com/ming2k/docgov");
     assert!(m2);
 
-    let (c3, m3) = canonicalize_upstream_source("https://github.com/ming2k/docgov-spec");
-    assert_eq!(c3, "https://github.com/ming2k/docgov-spec");
+    let (c3, m3) = canonicalize_upstream_source("https://github.com/ming2k/docgov");
+    assert_eq!(c3, "https://github.com/ming2k/docgov");
     assert!(!m3);
 
     let (c4, m4) = canonicalize_upstream_source("https://github.com/my-org/my-spec");
@@ -814,12 +766,12 @@ upstream:
         original,
         "0.1.0",
         "v0.1.0",
-        Some("https://github.com/ming2k/docgov-spec"),
+        Some("https://github.com/ming2k/docgov"),
     );
 
     assert!(patched.contains("version: \"0.1.0\""));
     assert!(patched.contains("ref: \"v0.1.0\""));
-    assert!(patched.contains("source: \"https://github.com/ming2k/docgov-spec\""));
+    assert!(patched.contains("source: \"https://github.com/ming2k/docgov\""));
     assert!(!patched.contains("docs-governance"));
     assert!(!patched.contains("v0.0.3"));
 }
@@ -836,7 +788,7 @@ fn test_update_atomic_rollback_on_sync_failure() {
     fs::write(ws.join(".docgov.yml"), initial_yml).unwrap();
 
     // Attempting update to a target that fails to sync
-    let res = docgov::cli::update_repo(&ws, Some("v0.9.9"), false, false, true);
+    let res = docgov::cli::update_repo(&ws, Some("v0.9.9"), false, false, true, false);
     assert!(res.is_err());
 
     // .docgov.yml must be safely rolled back to initial state
@@ -868,7 +820,7 @@ fn test_update_check_mode_detects_newer_spec_via_local_upstream() {
     fs::write(ws.join(".docgov.yml"), yml).unwrap();
 
     // `--check` must exit non-zero to signal "update available"
-    let code = docgov::cli::update_repo(&ws, None, true, false, false).unwrap();
+    let code = docgov::cli::update_repo(&ws, None, true, false, false, false).unwrap();
     assert_eq!(code, 1, "--check must exit 1 when an upgrade is available");
 
     // No files may be mutated in check mode
@@ -896,7 +848,7 @@ fn test_update_check_mode_reports_up_to_date_with_zero_exit() {
     );
     fs::write(ws.join(".docgov.yml"), yml).unwrap();
 
-    let code = docgov::cli::update_repo(&ws, None, true, false, false).unwrap();
+    let code = docgov::cli::update_repo(&ws, None, true, false, false, false).unwrap();
     assert_eq!(code, 0, "--check must exit 0 when already up to date");
 }
 
@@ -920,7 +872,7 @@ fn test_update_dry_run_makes_no_changes() {
     );
     fs::write(ws.join(".docgov.yml"), yml).unwrap();
 
-    let code = docgov::cli::update_repo(&ws, None, false, true, false).unwrap();
+    let code = docgov::cli::update_repo(&ws, None, false, true, false, false).unwrap();
     assert_eq!(code, 0);
 
     // Dry run must not touch the config or produce a lockfile
@@ -950,7 +902,7 @@ fn test_update_end_to_end_applies_upgrade_and_refreshes_lock() {
     );
     fs::write(ws.join(".docgov.yml"), yml).unwrap();
 
-    let code = docgov::cli::update_repo(&ws, None, false, false, false).unwrap();
+    let code = docgov::cli::update_repo(&ws, None, false, false, false, false).unwrap();
     assert_eq!(code, 0);
 
     // 1. Declaration advanced non-invasively
@@ -996,10 +948,10 @@ fn test_update_explicit_target_version_argument() {
     fs::write(ws.join(".docgov.yml"), yml).unwrap();
 
     // Explicit target pinning (accepts both 'v0.6.0' and '0.6.0')
-    let code = docgov::cli::update_repo(&ws, Some("0.6.0"), true, false, false).unwrap();
+    let code = docgov::cli::update_repo(&ws, Some("0.6.0"), true, false, false, false).unwrap();
     assert_eq!(code, 1);
 
-    let code = docgov::cli::update_repo(&ws, Some("v0.6.0"), false, true, false).unwrap();
+    let code = docgov::cli::update_repo(&ws, Some("v0.6.0"), false, true, false, false).unwrap();
     assert_eq!(code, 0);
 }
 
@@ -1023,7 +975,7 @@ fn test_update_refuses_unsupported_spec_major() {
     fs::write(ws.join(".docgov.yml"), yml).unwrap();
 
     // Spec major 1 exceeds SUPPORTED_SPEC_MAJOR (0): must hard-fail without touching files
-    let code = docgov::cli::update_repo(&ws, Some("v1.0.0"), false, false, false).unwrap();
+    let code = docgov::cli::update_repo(&ws, Some("v1.0.0"), false, false, false, false).unwrap();
     assert_eq!(
         code, 1,
         "Engine must refuse a spec major it cannot faithfully evaluate"
@@ -1054,7 +1006,7 @@ fn test_update_does_not_downgrade_without_force() {
     fs::write(ws.join(".docgov.yml"), yml).unwrap();
 
     // Attempt to move backwards: must be a safe no-op
-    let code = docgov::cli::update_repo(&ws, Some("v0.2.0"), false, false, false).unwrap();
+    let code = docgov::cli::update_repo(&ws, Some("v0.2.0"), false, false, false, false).unwrap();
     assert_eq!(code, 0);
 
     let after = fs::read_to_string(ws.join(".docgov.yml")).unwrap();

@@ -59,9 +59,10 @@ pub fn compare_semver(a: &str, b: &str) -> std::cmp::Ordering {
 
 /// Canonicalizes an upstream source specification URL.
 ///
-/// If an upstream configuration points to the legacy monorepo or CLI repository
-/// (e.g. `ming2k/docs-governance` or `ming2k/docgov`), it is transparently migrated
-/// to the dedicated sovereign specification repository (`https://github.com/ming2k/docgov-spec`).
+/// In the monorepo architecture, governance specifications are sovereignly
+/// hosted in `https://github.com/ming2k/docgov`. Legacy or alternate aliases
+/// (`ming2k/docs-governance` or `ming2k/docgov-spec`) are transparently migrated
+/// to `https://github.com/ming2k/docgov`.
 pub fn canonicalize_upstream_source(source: &str) -> (String, bool) {
     let trimmed = source.trim().trim_end_matches('/');
     let stripped = trimmed
@@ -72,8 +73,11 @@ pub fn canonicalize_upstream_source(source: &str) -> (String, bool) {
     if parts.len() >= 2 {
         let owner = parts[0];
         let repo = parts[1];
-        if owner == "ming2k" && (repo == "docs-governance" || repo == "docgov") {
-            return ("https://github.com/ming2k/docgov-spec".to_string(), true);
+        if owner == "ming2k" && (repo == "docs-governance" || repo == "docgov-spec") {
+            return ("https://github.com/ming2k/docgov".to_string(), true);
+        }
+        if owner == "ming2k" && repo == "docgov" {
+            return ("https://github.com/ming2k/docgov".to_string(), false);
         }
     }
     (trimmed.to_string(), false)
@@ -122,7 +126,28 @@ impl RemoteClient {
 
         let (owner, repo) = self.parse_owner_repo();
 
+        let is_explicit_spec_tag = |tag: &str| -> bool {
+            let t = tag.trim();
+            t.starts_with("spec-")
+        };
+
+        let normalize_tag = |raw: &str| -> String {
+            let trimmed = raw.trim();
+            if let Some(stripped) = trimmed.strip_prefix("spec-") {
+                if stripped.starts_with('v') {
+                    stripped.to_string()
+                } else {
+                    format!("v{}", stripped)
+                }
+            } else if trimmed.starts_with('v') {
+                trimmed.to_string()
+            } else {
+                format!("v{}", trimmed)
+            }
+        };
+
         // 2. Probe GitHub Web redirect (zero rate-limit, standard 302 location)
+        // If the redirect location explicitly points to a spec-* tag, we use it directly.
         let web_url = format!("https://github.com/{}/{}/releases/latest", owner, repo);
         if let Ok(agent) = ureq::AgentBuilder::new()
             .timeout(std::time::Duration::from_secs(5))
@@ -135,19 +160,22 @@ impl RemoteClient {
             if agent.status() == 302 {
                 if let Some(loc) = agent.header("Location") {
                     if let Some(tag) = loc.split("/releases/tag/").nth(1) {
-                        return Ok(LatestReleaseInfo {
-                            tag_name: tag.trim().to_string(),
-                            published_at: None,
-                            html_url: Some(loc.to_string()),
-                        });
+                        if is_explicit_spec_tag(tag) {
+                            return Ok(LatestReleaseInfo {
+                                tag_name: normalize_tag(tag),
+                                published_at: None,
+                                html_url: Some(loc.to_string()),
+                            });
+                        }
                     }
                 }
             }
         }
 
-        // 3. Fallback to GitHub REST API
+        // 3. Fallback to GitHub REST API: query releases list to find latest specification release
+        // (especially vital for monorepos where /releases/latest is the CLI engine release).
         let api_url = format!(
-            "https://api.github.com/repos/{}/{}/releases/latest",
+            "https://api.github.com/repos/{}/{}/releases?per_page=20",
             owner, repo
         );
         let resp = ureq::get(&api_url)
@@ -155,21 +183,42 @@ impl RemoteClient {
             .set("User-Agent", "docgov-cli")
             .set("Accept", "application/vnd.github.v3+json")
             .call()
-            .with_context(|| format!("Failed to fetch latest release from {}", api_url))?;
+            .with_context(|| format!("Failed to fetch releases from {}", api_url))?;
 
-        let body: serde_json::Value = serde_json::from_reader(resp.into_reader())?;
-        let tag_name = body["tag_name"]
-            .as_str()
-            .context("GitHub API response missing 'tag_name'")?
-            .to_string();
-        let published_at = body["published_at"].as_str().map(|s| s.to_string());
-        let html_url = body["html_url"].as_str().map(|s| s.to_string());
+        let releases: Vec<serde_json::Value> = serde_json::from_reader(resp.into_reader())?;
+        // Pass 1: Look for explicit spec-* tag in monorepo releases
+        for rel in &releases {
+            if let Some(raw_tag) = rel["tag_name"].as_str() {
+                if is_explicit_spec_tag(raw_tag) {
+                    let published_at = rel["published_at"].as_str().map(|s| s.to_string());
+                    let html_url = rel["html_url"].as_str().map(|s| s.to_string());
+                    return Ok(LatestReleaseInfo {
+                        tag_name: normalize_tag(raw_tag),
+                        published_at,
+                        html_url,
+                    });
+                }
+            }
+        }
 
-        Ok(LatestReleaseInfo {
-            tag_name,
-            published_at,
-            html_url,
-        })
+        // Pass 2: In case upstream is a dedicated standalone spec repository (standard v* tags),
+        // fallback to the first release not prefixed with "cli-"
+        for rel in &releases {
+            if let Some(raw_tag) = rel["tag_name"].as_str() {
+                let trimmed = raw_tag.trim();
+                if !trimmed.starts_with("cli-") {
+                    let published_at = rel["published_at"].as_str().map(|s| s.to_string());
+                    let html_url = rel["html_url"].as_str().map(|s| s.to_string());
+                    return Ok(LatestReleaseInfo {
+                        tag_name: normalize_tag(raw_tag),
+                        published_at,
+                        html_url,
+                    });
+                }
+            }
+        }
+
+        anyhow::bail!("No specification release found for {}/{}", owner, repo)
     }
 
     /// Resolve latest upstream release with a local TTL cache (default 6 hours).
@@ -296,6 +345,61 @@ impl RemoteClient {
         base.join(sanitized_source).join(&self.r#ref)
     }
 
+    /// Fetch config template with local-spec, cache-first, and remote-network strategy.
+    pub fn fetch_config_template(&self, workspace_root: Option<&Path>) -> Result<(String, String)> {
+        // 1. Local workspace specification source check
+        if let Some(ws) = workspace_root {
+            if let Some(spec_dir) = self.local_spec_dir(ws) {
+                let candidate_file = if spec_dir.join("default-config.yml").is_file() {
+                    spec_dir.join("default-config.yml")
+                } else if spec_dir.join("spec/default-config.yml").is_file() {
+                    spec_dir.join("spec/default-config.yml")
+                } else {
+                    PathBuf::new()
+                };
+                if candidate_file.is_file() {
+                    let content = fs::read_to_string(&candidate_file).with_context(|| {
+                        format!(
+                            "Failed to read local default config template at {}",
+                            candidate_file.display()
+                        )
+                    })?;
+                    return Ok((content, format!("local:{}", candidate_file.display())));
+                }
+            }
+        }
+
+        let cache_dir = self.get_cache_dir();
+        let cache_file = cache_dir.join("default-config.yml");
+
+        // 2. Cache hit check
+        if cache_file.exists() {
+            if let Ok(content) = fs::read_to_string(&cache_file) {
+                if !content.trim().is_empty() {
+                    return Ok((content, "cache".to_string()));
+                }
+            }
+        }
+
+        // 3. Network fetch attempt
+        let download_urls = self.candidate_config_download_urls();
+        for url in &download_urls {
+            if let Ok(content) = self.download_url(url) {
+                if !content.trim().is_empty() {
+                    let _ = fs::create_dir_all(&cache_dir);
+                    let _ = fs::write(&cache_file, &content);
+                    return Ok((content, url.clone()));
+                }
+            }
+        }
+
+        anyhow::bail!(
+            "Failed to fetch default config template for upstream '{}' (ref: '{}').",
+            self.source,
+            self.r#ref
+        );
+    }
+
     /// Fetch directives snippet with local-spec, cache-first, and remote-network strategy.
     /// Fails deterministically if the asset is not reachable.
     pub fn fetch_directives(&self, workspace_root: Option<&Path>) -> Result<(String, String)> {
@@ -416,20 +520,28 @@ impl RemoteClient {
                 .unwrap_or(&self.r#ref);
             let candidate_tar_urls = vec![
                 format!(
-                    "https://github.com/{}/{}/releases/download/{}/docgov-spec-{}.tar.gz",
-                    owner, repo, self.r#ref, clean_ver
-                ),
-                format!(
-                    "https://github.com/{}/{}/releases/download/{}/docgov-assets.tar.gz",
-                    owner, repo, self.r#ref
-                ),
-                format!(
                     "https://github.com/{}/{}/releases/download/spec-v{}/docgov-spec-{}.tar.gz",
+                    owner, repo, clean_ver, clean_ver
+                ),
+                format!(
+                    "https://github.com/{}/{}/releases/download/spec-v{}/dog-spec-{}.tar.gz",
                     owner, repo, clean_ver, clean_ver
                 ),
                 format!(
                     "https://github.com/{}/{}/releases/download/spec-v{}/docgov-assets.tar.gz",
                     owner, repo, clean_ver
+                ),
+                format!(
+                    "https://github.com/{}/{}/releases/download/{}/docgov-spec-{}.tar.gz",
+                    owner, repo, self.r#ref, clean_ver
+                ),
+                format!(
+                    "https://github.com/{}/{}/releases/download/{}/dog-spec-{}.tar.gz",
+                    owner, repo, self.r#ref, clean_ver
+                ),
+                format!(
+                    "https://github.com/{}/{}/releases/download/{}/docgov-assets.tar.gz",
+                    owner, repo, self.r#ref
                 ),
             ];
 
@@ -582,6 +694,38 @@ impl RemoteClient {
         Ok(hash)
     }
 
+    fn candidate_config_download_urls(&self) -> Vec<String> {
+        let (owner, repo) = self.parse_owner_repo();
+        let clean_ver = self
+            .r#ref
+            .strip_prefix("spec-v")
+            .or_else(|| self.r#ref.strip_prefix("spec-"))
+            .or_else(|| self.r#ref.strip_prefix('v'))
+            .unwrap_or(&self.r#ref);
+        vec![
+            format!(
+                "https://github.com/{}/{}/releases/download/spec-v{}/default-config.yml",
+                owner, repo, clean_ver
+            ),
+            format!(
+                "https://github.com/{}/{}/releases/download/{}/default-config.yml",
+                owner, repo, self.r#ref
+            ),
+            format!(
+                "https://raw.githubusercontent.com/{}/{}/spec-v{}/spec/default-config.yml",
+                owner, repo, clean_ver
+            ),
+            format!(
+                "https://raw.githubusercontent.com/{}/{}/{}/spec/default-config.yml",
+                owner, repo, self.r#ref
+            ),
+            format!(
+                "https://raw.githubusercontent.com/{}/{}/{}/default-config.yml",
+                owner, repo, self.r#ref
+            ),
+        ]
+    }
+
     fn candidate_download_urls(&self) -> Vec<String> {
         let (owner, repo) = self.parse_owner_repo();
         let clean_ver = self
@@ -591,7 +735,7 @@ impl RemoteClient {
             .or_else(|| self.r#ref.strip_prefix('v'))
             .unwrap_or(&self.r#ref);
         vec![
-            // 1. GitHub Release asset under spec-v* tag
+            // 1. GitHub Release asset under spec-v* tag (canonical monorepo release)
             format!(
                 "https://github.com/{}/{}/releases/download/spec-v{}/directives.snippet",
                 owner, repo, clean_ver
@@ -601,12 +745,17 @@ impl RemoteClient {
                 "https://github.com/{}/{}/releases/download/{}/directives.snippet",
                 owner, repo, self.r#ref
             ),
-            // 3. Raw GitHub content in spec/ subdirectory (docgov monorepo layout)
+            // 3. Raw GitHub content under spec-v* tag (docgov monorepo layout)
+            format!(
+                "https://raw.githubusercontent.com/{}/{}/spec-v{}/spec/directives.snippet",
+                owner, repo, clean_ver
+            ),
+            // 4. Raw GitHub content in spec/ subdirectory (docgov monorepo layout)
             format!(
                 "https://raw.githubusercontent.com/{}/{}/{}/spec/directives.snippet",
                 owner, repo, self.r#ref
             ),
-            // 4. Direct root directives.snippet in dedicated docgov-spec repository
+            // 5. Direct root directives.snippet in standalone repository
             format!(
                 "https://raw.githubusercontent.com/{}/{}/{}/directives.snippet",
                 owner, repo, self.r#ref
@@ -624,7 +773,7 @@ impl RemoteClient {
         if parts.len() >= 2 {
             (parts[0].to_string(), parts[1].to_string())
         } else {
-            ("ming2k".to_string(), "docgov-spec".to_string())
+            ("ming2k".to_string(), "docgov".to_string())
         }
     }
 

@@ -3,13 +3,13 @@ name: Release CLI
 on:
   push:
     tags:
-      - "cli-v*"
+      - "v*"
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "CLI tag to release (e.g. cli-v0.0.1)"
+        description: "CLI tag to release (e.g. v0.0.1)"
         required: false
-        default: "cli-v0.0.1"
+        default: "v0.0.1"
 
 permissions:
   contents: write

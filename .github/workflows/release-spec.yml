@@ -76,4 +76,5 @@ jobs:
             dist/directives.snippet
           draft: false
           prerelease: false
+          make_latest: false
           generate_release_notes: true

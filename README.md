@@ -45,11 +45,11 @@ docgov/
 
 | Component | Tag Pattern | Target Artifacts | Description |
 |---|---|---|---|
-| **CLI** | `cli-vx.x.x` | Multi-arch binaries (`docgov`), crates.io | High-performance verification and sync CLI |
+| **CLI** | `vx.x.x` | Multi-arch binaries (`docgov`), crates.io | High-performance verification and sync CLI |
 | **Spec** | `spec-vx.x.x` | `docgov-spec-*.tar.gz`, `directives.snippet` | Sovereign documentation governance standard |
 
 Release workflows are automated via GitHub Actions in `.github/workflows/`:
-* Pushing a `cli-v*` tag triggers cross-compilation and publishes binaries (`x86_64-linux`, `musl`, `macOS arm64/x86_64`, `Windows`).
+* Pushing a `v*` tag triggers cross-compilation and publishes binaries (`x86_64-linux`, `musl`, `macOS arm64/x86_64`, `Windows`).
 * Pushing a `spec-v*` tag packages the specification bundle and updates release distribution assets.
 
 ---
@@ -101,16 +101,10 @@ docgov init
 # Deterministic, offline, read-only CI verification of all repository invariants
 docgov check
 
-# Automatically repair fixable drift (e.g. missing ADR IDs, directives formatting)
-docgov fix
-
-# Synchronize upstream specification assets and refresh .docgov.lock
-docgov sync
-
-# Check and upgrade the workspace to a newer specification release
+# Check, synchronize assets, and update the workspace to a newer specification release
 docgov update
 
-# View local modifications and custom extensions against canonical specification assets
+# Fast git-diff trigger verification (code-to-doc synchronization)
 docgov diff
 ```
 

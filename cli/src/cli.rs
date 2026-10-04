@@ -50,7 +50,7 @@ pub enum OutputFormat {
 
 #[derive(Subcommand, Debug)]
 pub enum Commands {
-    /// Check repository compliance with all Protocol v0.0.1 invariants
+    /// Check repository compliance with all Protocol invariants
     Check {
         /// Also run git-diff trigger matrix checks
         #[arg(long)]
@@ -76,17 +76,6 @@ pub enum Commands {
         base: String,
     },
 
-    /// Automatically fix governance violations (frontmatter synthesis, directives, etc.)
-    Fix {
-        /// Preview changes without writing them to disk
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Specific rule IDs to fix (comma-separated, e.g. 'INV-LINT-03,INV-LINT-05')
-        #[arg(long, value_delimiter = ',')]
-        rules: Option<Vec<String>>,
-    },
-
     /// Initialize standard .docgov.yml configuration and AGENTS.md in the current repository
     Init {
         /// Overwrite existing configuration or refresh directive blocks
@@ -94,20 +83,9 @@ pub enum Commands {
         force: bool,
     },
 
-    /// Sync and atomically update canonical governance documentation and directives
-    Sync {
-        /// Force re-fetch and re-download assets
-        #[arg(long, short = 'F')]
-        force: bool,
-
-        /// Synchronize from local specification directory (spec/)
-        #[arg(long)]
-        local: bool,
-    },
-
-    /// Check and upgrade repository governance specification to the latest version
+    /// Update specification, synchronize remote assets, and refresh governance lockfile
     Update {
-        /// Target version to update to (e.g. 'v0.1.1', '0.1.1', or 'latest'). Defaults to latest upstream release.
+        /// Target version to update to (e.g. 'v0.1.1', '0.1.1', or 'latest'). Defaults to current upstream ref or latest release.
         #[arg(value_name = "TARGET_REF")]
         target: Option<String>,
 
@@ -119,9 +97,13 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
 
-        /// Force update even if already on the target version or downgrading
+        /// Force re-fetch and re-synchronize assets even if version unchanged or downgrading
         #[arg(long, short = 'F')]
         force: bool,
+
+        /// Synchronize from local specification directory (spec/)
+        #[arg(long)]
+        local: bool,
     },
 }
 
@@ -211,32 +193,6 @@ pub fn run() -> Result<i32> {
                 Ok(0)
             }
         }
-        Commands::Fix { dry_run, rules } => {
-            let summary = crate::fix::run_fix(&target_dir, rules.as_deref(), dry_run)?;
-            if summary.fixed.is_empty() {
-                println!(
-                    "{} No fixable violations found. Everything up to date.",
-                    "✔".green().bold()
-                );
-            } else {
-                let action_verb = if dry_run { "Would fix" } else { "Fixed" };
-                println!(
-                    "\n{} {} violation(s):\n",
-                    action_verb.green().bold(),
-                    summary.fixed.len()
-                );
-                for item in &summary.fixed {
-                    println!(
-                        "  {} {} - {}",
-                        "✔".green(),
-                        item.file_path.display(),
-                        item.description
-                    );
-                }
-                println!();
-            }
-            Ok(0)
-        }
         Commands::Diff { base } => {
             let start = std::time::Instant::now();
             let engine = LintEngine::new(&target_dir)?;
@@ -272,16 +228,20 @@ pub fn run() -> Result<i32> {
             init_repo(&target_dir, force)?;
             Ok(0)
         }
-        Commands::Sync { force, local } => {
-            sync_repo(&target_dir, force, local)?;
-            Ok(0)
-        }
         Commands::Update {
             target,
             check,
             dry_run,
             force,
-        } => update_repo(&target_dir, target.as_deref(), check, dry_run, force),
+            local,
+        } => update_repo(
+            &target_dir,
+            target.as_deref(),
+            check,
+            dry_run,
+            force,
+            local,
+        ),
     }
 }
 
@@ -360,72 +320,32 @@ fn output_diagnostics(
 fn init_repo(dir: &std::path::Path, force: bool) -> Result<()> {
     let docgov_yml = dir.join(".docgov.yml");
 
-    let yml_content = r#"version: "0.0.1"
+    if !docgov_yml.exists() || force {
+        let (cfg, _) = Config::load_from_dir(dir).unwrap_or((Config::default(), None));
+        let remote_client = RemoteClient::new(&cfg.upstream.source, &cfg.upstream.r#ref);
+        let yml_content = match remote_client.fetch_config_template(Some(dir)) {
+            Ok((content, _)) => content,
+            Err(_) => {
+                // Minimal standalone fallback only if completely unreachable
+                r#"version: "0.0.1"
 
-# Remote Upstream & Protocol Distribution
 upstream:
-  source: "https://github.com/ming2k/docgov-spec"
+  source: "https://github.com/ming2k/docgov"
   ref: "v0.0.1"
 
-# Canonical Governance Documentation Mirror (for Agent Context)
 governance_docs:
   install: true
   target_dir: "docs/governance/documentation"
 
-# [INV-LINT-01] Root Location Sanitization
-root_sanitization:
-  enforce: true
-  allowed_markdown:
-    - "README.md"
-    - "CHANGELOG.md"
-    - "CONTRIBUTING.md"
-    - "AGENTS.md"
-    - "LICENSE.md"
-    - "SECURITY.md"
-
-# [INV-LINT-02] Contributor Firewall Bindings
-firewall:
-  enforce: true
-  public_surfaces:
-    - "docs/tutorials/**"
-    - "docs/how-to/**"
-    - "docs/reference/**"
-    - "docs/explanation/**"
-  internal_surfaces:
-    - "docs/dev/**"
-
-# [INV-LINT-03] Architecture & Metadata Profile
-architecture:
-  enforce: true
-  adr_path: "docs/adr"
-  require_frontmatter:
-    enforce: true
-    status_enum: ["draft", "accepted", "superseded", "rejected", "deprecated"]
-    mandatory_fields: ["id", "title", "status", "date"]
-    tolerant_status: true
-
-# [INV-LINT-05] Agent Directives Binding
 agent_directives:
   enforce: true
   targets:
     - "AGENTS.md"
+"#
+                .to_string()
+            }
+        };
 
-# Baseline configuration (optional: suppress known legacy issues)
-# baseline: ".docgov-baseline.json"
-
-# [INV-LINT-04] Code-to-Doc Trigger Bindings
-#
-# Monitored source paths that require documentation synchronization in the same change.
-# `require_update` accepts a single glob or a list (any-of semantics).
-triggers:
-  - watch: "src/**"
-    require_update:
-      - "docs/**"
-      - "README.md"
-    message: "Source code modified; documentation must be synchronized in the same commit."
-"#;
-
-    if !docgov_yml.exists() || force {
         std::fs::write(&docgov_yml, yml_content)?;
         println!("{} Created {}", "+".green().bold(), docgov_yml.display());
     } else {
@@ -556,7 +476,16 @@ pub fn update_repo(
     check: bool,
     dry_run: bool,
     force: bool,
+    local: bool,
 ) -> Result<i32> {
+    if local {
+        println!(
+            "{} Synchronizing from local specification directory (spec/)...",
+            "🔍".cyan()
+        );
+        sync_repo(dir, force, true)?;
+        return Ok(0);
+    }
     let (cfg, config_path) = Config::load_from_dir(dir).unwrap_or((Config::default(), None));
     let lock = DocgovLock::load_from_dir(dir)?;
 
