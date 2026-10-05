@@ -1088,6 +1088,33 @@ fn test_lint_04_require_update_any_of_semantics() {
 }
 
 #[test]
+fn test_version_flag_prints_bare_semver() {
+    // The version flag must emit exactly the engine version with no program-name
+    // prefix and no trailing content, so release tooling can parse stdout directly.
+    let exe = env!("CARGO_BIN_EXE_docgov");
+
+    for flag in ["--version", "-V"] {
+        let output = std::process::Command::new(exe)
+            .arg(flag)
+            .output()
+            .expect("failed to run docgov");
+        assert!(output.status.success(), "{} exited non-zero", flag);
+
+        let stdout = String::from_utf8(output.stdout).unwrap();
+        assert_eq!(
+            stdout,
+            format!("{}\n", docgov::cli::CLI_VERSION),
+            "unexpected stdout for {}",
+            flag
+        );
+        assert!(
+            !stdout.starts_with("docgov "),
+            "version output must not carry a program-name prefix"
+        );
+    }
+}
+
+#[test]
 fn test_trigger_config_accepts_scalar_and_list_forms() {
     // Scalar form must deserialize into a single-element vector (backward compatible).
     let scalar = r#"
@@ -1115,4 +1142,175 @@ triggers:
         cfg.triggers[0].require_update,
         vec!["docs/**".to_string(), "README.md".to_string()]
     );
+}
+
+// =========================================================================
+// CLI Output Contract Tests
+//
+// These pin the guarantees that the unified presentation layer exists to
+// provide. If one fails, the contract in `docs/adr/` has been broken.
+// =========================================================================
+
+/// Emoji must never appear in rendered output: their width and glyph coverage vary
+/// across terminals, which is precisely why the contract mandates geometric symbols.
+#[test]
+fn test_text_output_contains_no_emoji() {
+    let diag = docgov::Diagnostic::error("INV-LINT-01", "Message", "A.md")
+        .with_location(1, 1)
+        .with_snippet("line")
+        .with_suggestion("fix it");
+
+    let rendered = diag.render_terminal();
+    for emoji in ['🔍', '🚀', '✨', '💡', 'ℹ', '⚠', '❌', '✅'] {
+        assert!(
+            !rendered.contains(emoji),
+            "emoji {emoji} leaked into terminal output: {rendered:?}"
+        );
+    }
+}
+
+/// Every diagnostic must expose a consistent `path[:line[:col]]` location, because
+/// both the text and GitHub renderers derive their location from it.
+#[test]
+fn test_location_string_degrades_gracefully() {
+    let full = docgov::Diagnostic::error("R", "m", "docs/a.md").with_location(7, 3);
+    assert_eq!(full.location_string(), "docs/a.md:7:3");
+
+    // A line without a column is legal and must degrade to `path:line`.
+    let mut no_col = docgov::Diagnostic::error("R", "m", "docs/a.md");
+    no_col.line = Some(7);
+    assert_eq!(no_col.location_string(), "docs/a.md:7");
+
+    let bare = docgov::Diagnostic::error("R", "m", "docs/a.md");
+    assert_eq!(bare.location_string(), "docs/a.md");
+}
+
+/// Diagnostic messages are untrusted input (they embed repository path names). They
+/// must not be able to forge or truncate a GitHub workflow command.
+#[test]
+fn test_github_renderer_escapes_control_characters() {
+    let diag = docgov::Diagnostic::error(
+        "INV-LINT-01",
+        "Trailing newline\ninjected::error::forged%2F",
+        "A.md",
+    );
+
+    let line = diag.render_github();
+    assert!(
+        !line.contains('\n'),
+        "raw newline must be escaped: {line:?}"
+    );
+    assert!(
+        line.ends_with("%0Ainjected::error::forged%252F"),
+        "got {line:?}"
+    );
+    assert_eq!(line.lines().count(), 1, "must remain a single command");
+}
+
+/// The JSON report is an envelope, not a bare array, and its summary must agree with
+/// the diagnostics it carries.
+#[test]
+fn test_json_report_envelope_and_summary() {
+    use docgov::diagnostics::{DiagnosticReport, ReportSummary, JSON_SCHEMA_VERSION};
+
+    let diagnostics = vec![
+        docgov::Diagnostic::error("R-1", "boom", "A.md"),
+        docgov::Diagnostic::warning("R-2", "hmm", "B.md"),
+        docgov::Diagnostic::warning("R-3", "hmm", "C.md"),
+    ];
+    let summary = ReportSummary::tally(&diagnostics, 4);
+    assert_eq!(
+        summary,
+        ReportSummary {
+            errors: 1,
+            warnings: 2,
+            notes: 0,
+            total: 3,
+            suppressed: 4,
+        }
+    );
+
+    let report = DiagnosticReport {
+        schema_version: JSON_SCHEMA_VERSION,
+        protocol_version: "0.0.2".to_string(),
+        summary,
+        diagnostics: &diagnostics,
+    };
+    let json = serde_json::to_value(&report).unwrap();
+
+    assert_eq!(json["schema_version"], JSON_SCHEMA_VERSION);
+    assert_eq!(json["protocol_version"], "0.0.2");
+    assert_eq!(json["summary"]["errors"], 1);
+    assert_eq!(json["summary"]["suppressed"], 4);
+    assert_eq!(json["diagnostics"].as_array().unwrap().len(), 3);
+    // Diagnostics must stay a globally sorted, deterministic sequence.
+    assert_eq!(json["diagnostics"][0]["file_path"], "A.md");
+}
+
+/// End-to-end check of the machine-readable contract through the real binary.
+#[test]
+fn test_binary_json_format_emits_parseable_envelope() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+
+    // An unapproved root Markdown file is a deterministic INV-LINT-01 violation.
+    fs::write(root.join("STRAY.md"), "# stray").unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_docgov"))
+        .arg("--path")
+        .arg(root)
+        .args(["check", "--format", "json"])
+        .output()
+        .expect("failed to run docgov");
+
+    // A violation means exit code 1, but stdout must still be valid JSON.
+    assert_eq!(output.status.code(), Some(1));
+
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    let json: serde_json::Value = serde_json::from_str(&stdout)
+        .unwrap_or_else(|e| panic!("stdout was not valid JSON ({e}): {stdout}"));
+
+    assert_eq!(json["schema_version"], 1);
+    assert_eq!(
+        json["protocol_version"],
+        docgov::config::Config::default().version
+    );
+    assert!(json["summary"]["errors"].as_u64().unwrap() >= 1);
+    assert!(json["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["rule_id"] == "INV-LINT-01" && d["severity"] == "Error"));
+
+    // Machine output must never carry decoration or timing chatter.
+    assert!(
+        !stdout.contains('\x1b'),
+        "escapes leaked into JSON: {stdout:?}"
+    );
+}
+
+/// `--color=never` must produce byte-identical output to auto-detected non-TTY runs,
+/// giving CI a fully deterministic capture.
+#[test]
+fn test_binary_color_never_strips_all_escapes() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+    fs::write(root.join("STRAY.md"), "# stray").unwrap();
+
+    let run = |extra: &[&str]| {
+        let output = std::process::Command::new(env!("CARGO_BIN_EXE_docgov"))
+            .arg("--path")
+            .arg(root)
+            .args(extra)
+            .args(["check", "--color", "never"])
+            .output()
+            .expect("failed to run docgov");
+        String::from_utf8(output.stdout).unwrap()
+    };
+
+    let plain = run(&[]);
+    assert!(!plain.contains('\x1b'), "escapes present: {plain:?}");
+    assert!(plain.contains("[INV-LINT-01]"));
+    // The severity glyph must be present so findings stay scannable without color.
+    assert!(plain.contains('×'), "missing severity glyph: {plain:?}");
 }

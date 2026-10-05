@@ -11,7 +11,6 @@ A compiler-grade documentation and architecture governance standard and verifica
 ```text
 docgov/
 ├── Cargo.toml                  # Monorepo Cargo workspace
-├── action.yml                  # GitHub Actions composite action
 ├── install.sh                  # Universal installation script
 ├── cli/                        # CLI engine package (docgov binary)
 │   ├── Cargo.toml              # Rust crate manifest
@@ -79,15 +78,20 @@ cargo build --release
 ./target/release/docgov --help
 ```
 
-### GitHub Actions Integration
+### CI Integration
 
-Add `docgov` to your CI workflow:
+`docgov` ships as a single self-contained binary. Install it (via the
+[universal installer](#installation) or `cargo install --path cli`) and invoke it
+directly from any CI provider using the `--format` flag your platform understands
+(`github`, `json`, or `text`):
 
 ```yaml
+# GitHub Actions example
+- name: Install docgov
+  run: curl -fsSL https://raw.githubusercontent.com/ming2k/docgov/main/install.sh | sh
+
 - name: Verify Documentation Governance
-  uses: ming2k/docgov@main
-  with:
-    command: "check"
+  run: docgov check --format=github
 ```
 
 ---
@@ -95,6 +99,9 @@ Add `docgov` to your CI workflow:
 ## 4. CLI Commands
 
 ```bash
+# Print the engine version (bare semantic version, e.g. 0.0.3)
+docgov --version
+
 # Initialize standard .docgov.yml configuration and AGENTS.md in the workspace
 docgov init
 
@@ -107,6 +114,25 @@ docgov update
 # Fast git-diff trigger verification (code-to-doc synchronization)
 docgov diff
 ```
+
+### Output Contract
+
+All commands share one output contract, selectable with `--format` and `--color`:
+
+| Format | Audience | Shape |
+| :--- | :--- | :--- |
+| `text` (default) | Humans | Report with distinct severity glyphs (`×` error, `!` warning), `help:` suggestions, and a summary verdict line |
+| `github` | GitHub Actions | `::error file=…,line=…,col=…,title=[RULE]::message` workflow commands |
+| `json` | Tooling | Versioned envelope: `{schema_version, protocol_version, summary, diagnostics}` |
+
+`--color <auto\|always\|never>` defaults to `auto`, which honors the `NO_COLOR` convention
+and colorizes only when stdout is a terminal. Machine formats (`github`, `json`) are pure
+data — no color, timing, or advisory hints — so they can be redirected and parsed directly.
+Set `DOCGOV_ASCII=1` to swap the Unicode glyph alphabet for 7-bit ASCII.
+
+Exit codes are stable across commands: `0` clean, `1` findings or an available update,
+`2` engine failure. See [ADR-0001](docs/adr/0001-cli-output-contract.md) for the binding
+invariants.
 
 ---
 

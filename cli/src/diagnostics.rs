@@ -1,6 +1,7 @@
-use colored::*;
 use serde::Serialize;
 use std::path::PathBuf;
+
+use crate::output;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub enum Severity {
@@ -72,47 +73,70 @@ impl Diagnostic {
         self
     }
 
-    /// Format for terminal with rich ANSI coloring
+    /// Render the diagnostic for a terminal.
+    ///
+    /// The layout is deliberately uniform across all four shapes (with/without
+    /// snippet, with/without suggestion) so that a log is scannable:
+    ///
+    /// ```text
+    ///   × [INV-LINT-02]  docs/tutorials/quick.md:3:5
+    ///   3 │ See [dev](../dev/setup.md).
+    ///   · Public document contains relative link into internal surface 'docs/dev/setup.md'
+    ///   help: Move shared concepts into public documentation (e.g. 'docs/explanation/').
+    /// ```
+    ///
+    /// The severity glyph (`×` / `!` / `i`) is distinct per severity, and the rule id
+    /// and location always share the header line. Decoration is emitted only when
+    /// color/glyph settings allow it; see [`crate::output`].
     pub fn render_terminal(&self) -> String {
-        let tag = match self.severity {
-            Severity::Error => format!("[{}]", self.rule_id).red().bold(),
-            Severity::Warning => format!("[{}]", self.rule_id).yellow().bold(),
-            Severity::Note => format!("[{}]", self.rule_id).blue().bold(),
-        };
+        let glyph = output::severity_glyph(&self.severity);
+        let tag = output::paint(
+            &format!("[{}]", self.rule_id),
+            output::severity_color(&self.severity),
+        );
+        let loc = output::cyan(&self.location_string());
 
-        let loc = match (self.line, self.column) {
-            (Some(l), Some(c)) => format!("{}:{}:{}", self.file_path.display(), l, c),
-            (Some(l), None) => format!("{}:{}", self.file_path.display(), l),
-            (None, _) => format!("{}", self.file_path.display()),
-        };
-
-        let mut out = format!("  {} {}\n   ╭─[ {} ]\n", "×".red().bold(), tag, loc.cyan());
+        let mut out = format!("  {} {}  {}\n", glyph, tag, loc);
 
         if let Some(snippet) = &self.snippet {
             let l_str = self
                 .line
                 .map(|l| l.to_string())
                 .unwrap_or_else(|| "·".to_string());
-            out.push_str(&format!("{:>3} │ {}\n", l_str.dimmed(), snippet));
-            out.push_str(&format!("   · {}\n", format!("╰── {}", self.message).red()));
-        } else {
-            out.push_str(&format!("   · {}\n", self.message));
+            out.push_str(&format!(
+                "{:>3} {} {}\n",
+                output::dimmed(&l_str),
+                output::dimmed("│"),
+                snippet
+            ));
         }
 
+        out.push_str(&format!("  {} {}\n", output::dimmed("·"), self.message));
+
         if let Some(suggestion) = &self.suggestion {
-            out.push_str(&format!(
-                "   ╰────\n  {}: {}\n",
-                "help".green().bold(),
-                suggestion
-            ));
-        } else {
-            out.push_str("   ╰────\n");
+            out.push_str(&format!("  {} {}\n", output::green("help:"), suggestion));
         }
 
         out
     }
 
-    /// Format as GitHub Action workflow command
+    /// `path:line:col`, degrading gracefully when location data is absent.
+    ///
+    /// This is the single source of truth for the location fragment, shared by the
+    /// text and GitHub renderers so the two can never drift apart.
+    pub fn location_string(&self) -> String {
+        match (self.line, self.column) {
+            (Some(l), Some(c)) => format!("{}:{}:{}", self.file_path.display(), l, c),
+            (Some(l), None) => format!("{}:{}", self.file_path.display(), l),
+            (None, _) => self.file_path.display().to_string(),
+        }
+    }
+
+    /// Format as a GitHub Action workflow command.
+    ///
+    /// Emits the canonical `::error file=...,line=...,col=...,title=...::message` form.
+    /// The message is escaped for the workflow-command grammar so that a diagnostic
+    /// containing `%`, `\r`, or `\n` cannot truncate or forge the annotation.
     pub fn render_github(&self) -> String {
         let level = match self.severity {
             Severity::Error => "error",
@@ -129,6 +153,67 @@ impl Diagnostic {
         }
         meta.push_str(&format!(",title=[{}]", self.rule_id));
 
-        format!("::{} {}::{}", level, meta, self.message)
+        format!(
+            "::{} {}::{}",
+            level,
+            meta,
+            escape_github_message(&self.message)
+        )
     }
 }
+
+/// Escape a payload for the GitHub Actions workflow-command grammar.
+///
+/// The runner parses `::`-delimited commands line by line, so unescaped `%`, CR, or LF
+/// in a diagnostic message would corrupt the stream.
+fn escape_github_message(message: &str) -> String {
+    message
+        .replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
+/// Machine-readable envelope emitted for `--format=json`.
+///
+/// A bare array (the pre-contract shape) leaves consumers with no way to distinguish
+/// "no findings" from "engine failed to start", and no way to branch on schema
+/// evolution. The envelope carries the protocol version and a severity tally so a CI
+/// job can gate on `summary.errors` without re-deriving it.
+///
+/// Timing is intentionally absent: this document is meant to be byte-reproducible for
+/// a given workspace, which makes it diffable and snapshot-testable.
+#[derive(Debug, Serialize)]
+pub struct DiagnosticReport<'a> {
+    pub schema_version: u32,
+    pub protocol_version: String,
+    pub summary: ReportSummary,
+    pub diagnostics: &'a [Diagnostic],
+}
+
+/// Severity tally for a [`DiagnosticReport`].
+#[derive(Debug, Serialize, PartialEq, Eq)]
+pub struct ReportSummary {
+    pub errors: usize,
+    pub warnings: usize,
+    pub notes: usize,
+    pub total: usize,
+    /// Findings hidden by a baseline file, reported so "check passed" is never
+    /// mistaken for "repository is clean".
+    pub suppressed: usize,
+}
+
+impl ReportSummary {
+    pub fn tally(diagnostics: &[Diagnostic], suppressed: usize) -> Self {
+        let count = |want: Severity| diagnostics.iter().filter(|d| d.severity == want).count();
+        Self {
+            errors: count(Severity::Error),
+            warnings: count(Severity::Warning),
+            notes: count(Severity::Note),
+            total: diagnostics.len(),
+            suppressed,
+        }
+    }
+}
+
+/// The schema version of the `--format=json` document. Bump on any breaking change.
+pub const JSON_SCHEMA_VERSION: u32 = 1;

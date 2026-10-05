@@ -1,13 +1,15 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand, ValueEnum};
-use colored::*;
 use std::path::PathBuf;
 
 use crate::config::Config;
-use crate::diagnostics::Severity;
+use crate::diagnostics::{
+    Diagnostic, DiagnosticReport, ReportSummary, Severity, JSON_SCHEMA_VERSION,
+};
 use crate::engine::LintEngine;
 use crate::git::get_changed_files;
 use crate::lockfile::{compute_sha256, ArtifactEntry, DocgovLock};
+use crate::output::{self, ColorChoice, Sym};
 use crate::remote::RemoteClient;
 use crate::rules::lint_05_agent_directives::{
     extract_directives_block, patch_agent_directives, PatchAction,
@@ -21,14 +23,25 @@ use crate::rules::lint_05_agent_directives::{
 /// yield a false "compliant" verdict).
 pub const SUPPORTED_SPEC_MAJOR: u64 = 0;
 
+/// The compiled engine version, single-sourced from `Cargo.toml`.
+///
+/// This is exposed as a machine-readable, bare semantic version string (e.g. `0.0.3`)
+/// so release tooling and scripts can parse stdout directly without stripping a
+/// program-name prefix.
+pub const CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Parser, Debug)]
 #[command(
     name = "docgov",
-    version,
+    disable_version_flag = true,
     about = "High-performance, zero-vendoring documentation and architecture governance linter",
     long_about = "A fast, deterministic compiler-grade linter for documentation governance and system invariants."
 )]
 pub struct Cli {
+    /// Print the engine version and exit
+    #[arg(short = 'V', long = "version", global = true)]
+    pub version: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 
@@ -39,6 +52,29 @@ pub struct Cli {
     /// Output format
     #[arg(short, long, global = true, value_enum, default_value_t = OutputFormat::Text)]
     pub format: OutputFormat,
+
+    /// When to colorize human-readable output
+    #[arg(long, global = true, value_enum, default_value_t = ColorChoice::Auto)]
+    pub color: ColorChoice,
+}
+
+impl ValueEnum for ColorChoice {
+    fn value_variants<'a>() -> &'a [Self] {
+        &[ColorChoice::Auto, ColorChoice::Always, ColorChoice::Never]
+    }
+
+    fn to_possible_value(&self) -> Option<clap::builder::PossibleValue> {
+        Some(match self {
+            ColorChoice::Auto => clap::builder::PossibleValue::new("auto")
+                .help("Colorize only when stdout is a terminal"),
+            ColorChoice::Always => {
+                clap::builder::PossibleValue::new("always").help("Always colorize output")
+            }
+            ColorChoice::Never => {
+                clap::builder::PossibleValue::new("never").help("Never colorize output")
+            }
+        })
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord, ValueEnum, Debug)]
@@ -107,152 +143,210 @@ pub enum Commands {
     },
 }
 
-pub fn run() -> Result<i32> {
+/// Process entrypoint: parse arguments, run the selected command, and map the outcome
+/// onto a process exit code.
+///
+/// Centralizing error presentation here (rather than in `main`) means every binary —
+/// including the `dog` alias — inherits identical, format-aware error handling.
+pub fn run() -> i32 {
     let cli = Cli::parse();
-    let target_dir = cli.path.unwrap_or_else(|| PathBuf::from("."));
 
-    match cli.command.unwrap_or(Commands::Check {
-        diff: false,
-        base: None,
-        baseline: None,
-        generate_baseline: None,
-    }) {
-        Commands::Check {
+    // Resolve the global presentation switches before anything can render.
+    output::init(cli.color);
+
+    match run_command(&cli) {
+        Ok(code) => code,
+        Err(err) => {
+            emit_fatal_error(cli.format, &err);
+            2
+        }
+    }
+}
+
+fn run_command(cli: &Cli) -> Result<i32> {
+    // Bare engine version, printed before any workspace/spec resolution so that
+    // `docgov --version` is a pure, offline, side-effect-free query. The bytes on
+    // stdout are exactly the version string (no program-name prefix, no color).
+    if cli.version {
+        println!("{}", CLI_VERSION);
+        return Ok(0);
+    }
+
+    let target_dir = cli.path.clone().unwrap_or_else(|| PathBuf::from("."));
+
+    match cli.command.as_ref() {
+        None => run_check(
+            &target_dir,
+            cli.format,
+            false,
+            None,
+            None,
+            None,
+            /* notifier allowed */ cli.format == OutputFormat::Text,
+        ),
+        Some(Commands::Check {
             diff,
             base,
             baseline,
             generate_baseline,
-        } => {
-            let start = std::time::Instant::now();
-            let engine = LintEngine::new(&target_dir)?;
-
-            let changed = if diff || base.is_some() {
-                Some(get_changed_files(&target_dir, base.as_deref())?)
-            } else {
-                None
-            };
-
-            let raw_diagnostics = engine.run_lint(changed.as_deref())?;
-
-            if let Some(baseline_out) = generate_baseline {
-                let base_obj = crate::baseline::Baseline::from_diagnostics(
-                    &engine.config.version,
-                    &raw_diagnostics,
-                );
-                let out_path = if baseline_out.is_absolute() {
-                    baseline_out
-                } else {
-                    target_dir.join(baseline_out)
-                };
-                base_obj.save_to_file(&out_path)?;
-                println!(
-                    "{} Generated baseline with {} violation(s) at {}",
-                    "✔".green().bold(),
-                    base_obj.entries.len(),
-                    out_path.display()
-                );
-                return Ok(0);
-            }
-
-            let baseline_path = baseline
-                .map(|p| {
-                    if p.is_absolute() {
-                        p
-                    } else {
-                        target_dir.join(p)
-                    }
-                })
-                .or_else(|| engine.config.baseline.as_ref().map(|p| target_dir.join(p)));
-
-            let (diagnostics, suppressed_count) = if let Some(bpath) = baseline_path {
-                if bpath.exists() {
-                    let base_obj = crate::baseline::Baseline::load_from_file(&bpath)?;
-                    let (filtered, supp) = base_obj.filter_diagnostics(raw_diagnostics);
-                    (filtered, supp)
-                } else {
-                    (raw_diagnostics, 0)
-                }
-            } else {
-                (raw_diagnostics, 0)
-            };
-
-            let duration = start.elapsed();
-
-            output_diagnostics(
-                &diagnostics,
-                cli.format,
-                duration,
-                suppressed_count,
-                &engine.config.version,
-            );
-
-            let error_count = diagnostics
-                .iter()
-                .filter(|d| d.severity == Severity::Error)
-                .count();
-
-            check_for_spec_update_hint(&target_dir, &engine.config);
-
-            if error_count > 0 {
-                Ok(1)
-            } else {
-                Ok(0)
-            }
-        }
-        Commands::Diff { base } => {
-            let start = std::time::Instant::now();
-            let engine = LintEngine::new(&target_dir)?;
-            let changed = get_changed_files(&target_dir, Some(&base))?;
-
-            // Run only git trigger rule
-            let ctx = crate::rules::LintContext {
-                workspace_root: &engine.workspace_root,
-                config: &engine.config,
-                root_files: &[],
-                markdown_docs: &std::collections::HashMap::new(),
-                changed_files: Some(&changed),
-            };
-
-            let rule = crate::rules::lint_04_trigger::GitSyncTriggerRule;
-            use crate::rules::Rule;
-            let diagnostics = rule.check(&ctx)?;
-            let duration = start.elapsed();
-
-            output_diagnostics(&diagnostics, cli.format, duration, 0, &engine.config.version);
-
-            let error_count = diagnostics
-                .iter()
-                .filter(|d| d.severity == Severity::Error)
-                .count();
-            if error_count > 0 {
-                Ok(1)
-            } else {
-                Ok(0)
-            }
-        }
-        Commands::Init { force } => {
-            init_repo(&target_dir, force)?;
+        }) => run_check(
+            &target_dir,
+            cli.format,
+            *diff,
+            base.as_deref(),
+            baseline.clone(),
+            generate_baseline.clone(),
+            cli.format == OutputFormat::Text,
+        ),
+        Some(Commands::Diff { base }) => run_diff(&target_dir, cli.format, base),
+        Some(Commands::Init { force }) => {
+            init_repo(&target_dir, *force)?;
             Ok(0)
         }
-        Commands::Update {
+        Some(Commands::Update {
             target,
             check,
             dry_run,
             force,
             local,
-        } => update_repo(
+        }) => update_repo(
             &target_dir,
             target.as_deref(),
-            check,
-            dry_run,
-            force,
-            local,
+            *check,
+            *dry_run,
+            *force,
+            *local,
         ),
     }
 }
 
+/// Execute a lint pass and render the report.
+///
+/// `notify` gates the advisory "new spec available" hint; it is only ever true for the
+/// `text` format, keeping machine-readable streams free of decoration.
+fn run_check(
+    target_dir: &std::path::Path,
+    format: OutputFormat,
+    diff: bool,
+    base: Option<&str>,
+    baseline: Option<PathBuf>,
+    generate_baseline: Option<PathBuf>,
+    notify: bool,
+) -> Result<i32> {
+    let start = std::time::Instant::now();
+    let engine = LintEngine::new(target_dir)?;
+
+    let changed = if diff || base.is_some() {
+        Some(get_changed_files(target_dir, base)?)
+    } else {
+        None
+    };
+
+    let raw_diagnostics = engine.run_lint(changed.as_deref())?;
+
+    if let Some(baseline_out) = generate_baseline {
+        let base_obj =
+            crate::baseline::Baseline::from_diagnostics(&engine.config.version, &raw_diagnostics);
+        let out_path = if baseline_out.is_absolute() {
+            baseline_out
+        } else {
+            target_dir.join(baseline_out)
+        };
+        base_obj.save_to_file(&out_path)?;
+        println!(
+            "{}",
+            output::status(
+                Sym::Success,
+                format!(
+                    "Generated baseline with {} at {}",
+                    output::plural(base_obj.entries.len(), "violation", "violations"),
+                    out_path.display()
+                )
+            )
+        );
+        return Ok(0);
+    }
+
+    let baseline_path = baseline
+        .map(|p| {
+            if p.is_absolute() {
+                p
+            } else {
+                target_dir.join(p)
+            }
+        })
+        .or_else(|| engine.config.baseline.as_ref().map(|p| target_dir.join(p)));
+
+    let (diagnostics, suppressed_count) = if let Some(bpath) = baseline_path {
+        if bpath.exists() {
+            let base_obj = crate::baseline::Baseline::load_from_file(&bpath)?;
+            let (filtered, supp) = base_obj.filter_diagnostics(raw_diagnostics);
+            (filtered, supp)
+        } else {
+            (raw_diagnostics, 0)
+        }
+    } else {
+        (raw_diagnostics, 0)
+    };
+
+    let duration = start.elapsed();
+
+    output_diagnostics(
+        &diagnostics,
+        format,
+        duration,
+        suppressed_count,
+        &engine.config.version,
+    );
+
+    let error_count = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .count();
+
+    if notify {
+        check_for_spec_update_hint(target_dir, &engine.config);
+    }
+
+    Ok(if error_count > 0 { 1 } else { 0 })
+}
+
+/// Execute the standalone git-diff trigger check (`docgov diff`).
+fn run_diff(target_dir: &std::path::Path, format: OutputFormat, base: &str) -> Result<i32> {
+    let start = std::time::Instant::now();
+    let engine = LintEngine::new(target_dir)?;
+    let changed = get_changed_files(target_dir, Some(base))?;
+
+    // Run only git trigger rule
+    let ctx = crate::rules::LintContext {
+        workspace_root: &engine.workspace_root,
+        config: &engine.config,
+        root_files: &[],
+        markdown_docs: &std::collections::HashMap::new(),
+        changed_files: Some(&changed),
+    };
+
+    let rule = crate::rules::lint_04_trigger::GitSyncTriggerRule;
+    use crate::rules::Rule;
+    let diagnostics = rule.check(&ctx)?;
+    let duration = start.elapsed();
+
+    output_diagnostics(&diagnostics, format, duration, 0, &engine.config.version);
+
+    let error_count = diagnostics
+        .iter()
+        .filter(|d| d.severity == Severity::Error)
+        .count();
+    Ok(if error_count > 0 { 1 } else { 0 })
+}
+
+/// Render the final report for a lint pass, in the requested output format.
+///
+/// Only the `text` format emits timing, decoration, or summaries. `github` and `json`
+/// are pure data channels so they can be consumed by CI without post-processing, and
+/// so that redirecting them to a file yields a byte-reproducible artifact.
 fn output_diagnostics(
-    diagnostics: &[crate::diagnostics::Diagnostic],
+    diagnostics: &[Diagnostic],
     format: OutputFormat,
     duration: std::time::Duration,
     suppressed_count: usize,
@@ -260,23 +354,24 @@ fn output_diagnostics(
 ) {
     match format {
         OutputFormat::Text => {
+            let summary = ReportSummary::tally(diagnostics, suppressed_count);
+
             if diagnostics.is_empty() {
-                if suppressed_count > 0 {
-                    println!(
-                        "{} All Protocol v{} documentation invariants verified in {:.3}s. (Suppressed {} known baseline violation(s))",
-                        "✔".green().bold(),
-                        protocol_version,
-                        duration.as_secs_f64(),
-                        suppressed_count
-                    );
-                } else {
-                    println!(
-                        "{} All Protocol v{} documentation invariants verified in {:.3}s.",
-                        "✔".green().bold(),
+                let mut line = output::status(
+                    Sym::Success,
+                    format!(
+                        "All Protocol v{} documentation invariants verified in {:.3}s.",
                         protocol_version,
                         duration.as_secs_f64()
-                    );
+                    ),
+                );
+                if suppressed_count > 0 {
+                    line.push_str(&format!(
+                        " ({} suppressed by baseline)",
+                        output::plural(suppressed_count, "known violation", "known violations")
+                    ));
                 }
+                println!("{}", line);
                 return;
             }
 
@@ -285,33 +380,26 @@ fn output_diagnostics(
                 println!("{}", diag.render_terminal());
             }
 
-            let errors = diagnostics
-                .iter()
-                .filter(|d| d.severity == Severity::Error)
-                .count();
-            let warnings = diagnostics
-                .iter()
-                .filter(|d| d.severity == Severity::Warning)
-                .count();
-
-            if suppressed_count > 0 {
-                println!(
-                    "{} Found {} error(s) and {} warning(s) in {:.3}s. (Check failed, {} suppressed by baseline)\n",
-                    "✖".red().bold(),
-                    errors,
-                    warnings,
-                    duration.as_secs_f64(),
-                    suppressed_count
-                );
-            } else {
-                println!(
-                    "{} Found {} error(s) and {} warning(s) in {:.3}s. (Check failed)\n",
-                    "✖".red().bold(),
-                    errors,
-                    warnings,
+            let counts = format!(
+                "{}, {}",
+                output::plural(summary.errors, "error", "errors"),
+                output::plural(summary.warnings, "warning", "warnings")
+            );
+            let mut verdict = output::status(
+                Sym::Error,
+                format!(
+                    "Found {} in {:.3}s. (Check failed)",
+                    counts,
                     duration.as_secs_f64()
-                );
+                ),
+            );
+            if suppressed_count > 0 {
+                verdict.push_str(&format!(
+                    " ({} suppressed by baseline)",
+                    output::plural(suppressed_count, "violation", "violations")
+                ));
             }
+            println!("{}\n", verdict);
         }
         OutputFormat::Github => {
             for diag in diagnostics {
@@ -319,11 +407,51 @@ fn output_diagnostics(
             }
         }
         OutputFormat::Json => {
-            if let Ok(json) = serde_json::to_string_pretty(diagnostics) {
-                println!("{}", json);
-            }
+            println!(
+                "{}",
+                render_json_report(diagnostics, suppressed_count, protocol_version)
+            );
         }
     }
+}
+
+/// Serialize the machine-readable report envelope.
+///
+/// Extracted from [`output_diagnostics`] so the failure path in `run()` can emit the
+/// same envelope (with a zeroed summary) instead of a bare array — a consumer that
+/// always parses one shape is far easier to write than one that must sniff for two.
+fn render_json_report(
+    diagnostics: &[Diagnostic],
+    suppressed_count: usize,
+    protocol_version: &str,
+) -> String {
+    let report = DiagnosticReport {
+        schema_version: JSON_SCHEMA_VERSION,
+        protocol_version: protocol_version.to_string(),
+        summary: ReportSummary::tally(diagnostics, suppressed_count),
+        diagnostics,
+    };
+    serde_json::to_string_pretty(&report)
+        .unwrap_or_else(|_| "{\"schema_version\":1,\"diagnostics\":[]}".to_string())
+}
+
+/// Emit a fatal engine error, honoring the requested output format.
+///
+/// In `json` mode the error is delivered as a machine-readable envelope on stdout so
+/// a CI consumer never has to scrape stderr prose; the human-readable form always
+/// goes to stderr.
+fn emit_fatal_error(format: OutputFormat, err: &anyhow::Error) {
+    if format == OutputFormat::Json {
+        let payload = serde_json::json!({
+            "schema_version": JSON_SCHEMA_VERSION,
+            "error": format!("{:#}", err),
+        });
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&payload).unwrap_or_default()
+        );
+    }
+    eprintln!("{} {:#}", output::red("Error:"), err);
 }
 
 fn init_repo(dir: &std::path::Path, force: bool) -> Result<()> {
@@ -356,9 +484,15 @@ agent_directives:
         };
 
         std::fs::write(&docgov_yml, yml_content)?;
-        println!("{} Created {}", "+".green().bold(), docgov_yml.display());
+        println!(
+            "{}",
+            output::status(Sym::Create, format!("Created {}", docgov_yml.display()))
+        );
     } else {
-        println!("{} Exists: {}", "~".yellow().bold(), docgov_yml.display());
+        println!(
+            "{}",
+            output::status(Sym::Update, format!("Exists: {}", docgov_yml.display()))
+        );
     }
 
     sync_repo(dir, force, false)
@@ -419,40 +553,62 @@ fn sync_repo(dir: &std::path::Path, force: bool, local: bool) -> Result<()> {
             PatchAction::Created => {
                 std::fs::write(&target_path, &new_content)?;
                 println!(
-                    "{} Created {} with docgov directives block",
-                    "+".green().bold(),
-                    target_path.display()
+                    "{}",
+                    output::status(
+                        Sym::Create,
+                        format!(
+                            "Created {} with docgov directives block",
+                            target_path.display()
+                        )
+                    )
                 );
             }
             PatchAction::Appended => {
                 std::fs::write(&target_path, &new_content)?;
                 println!(
-                    "{} Non-invasively inserted docgov directives block into {}",
-                    "+".green().bold(),
-                    target_path.display()
+                    "{}",
+                    output::status(
+                        Sym::Create,
+                        format!(
+                            "Non-invasively inserted docgov directives block into {}",
+                            target_path.display()
+                        )
+                    )
                 );
             }
             PatchAction::Updated => {
                 std::fs::write(&target_path, &new_content)?;
                 println!(
-                    "{} Updated docgov directives block in {}",
-                    "~".yellow().bold(),
-                    target_path.display()
+                    "{}",
+                    output::status(
+                        Sym::Update,
+                        format!(
+                            "Updated docgov directives block in {}",
+                            target_path.display()
+                        )
+                    )
                 );
             }
             PatchAction::Unchanged => {
                 if force {
                     std::fs::write(&target_path, &new_content)?;
                     println!(
-                        "{} Refreshed docgov directives block in {}",
-                        "~".yellow().bold(),
-                        target_path.display()
+                        "{}",
+                        output::status(
+                            Sym::Update,
+                            format!(
+                                "Refreshed docgov directives block in {}",
+                                target_path.display()
+                            )
+                        )
                     );
                 } else {
                     println!(
-                        "{} Directives up to date: {}",
-                        "✔".green().bold(),
-                        target_path.display()
+                        "{}",
+                        output::status(
+                            Sym::Success,
+                            format!("Directives up to date: {}", target_path.display())
+                        )
                     );
                 }
             }
@@ -471,9 +627,11 @@ fn sync_repo(dir: &std::path::Path, force: bool, local: bool) -> Result<()> {
 
     lock.save_to_dir(dir)?;
     println!(
-        "{} Updated {}",
-        "✔".green().bold(),
-        DocgovLock::lockfile_path(dir).display()
+        "{}",
+        output::status(
+            Sym::Success,
+            format!("Updated {}", DocgovLock::lockfile_path(dir).display())
+        )
     );
 
     Ok(())
@@ -489,8 +647,11 @@ pub fn update_repo(
 ) -> Result<i32> {
     if local {
         println!(
-            "{} Synchronizing from local specification directory (spec/)...",
-            "🔍".cyan()
+            "{}",
+            output::status(
+                Sym::Info,
+                "Synchronizing from local specification directory (spec/)..."
+            )
         );
         sync_repo(dir, force, true)?;
         return Ok(0);
@@ -513,18 +674,26 @@ pub fn update_repo(
 
     if migrated {
         println!(
-            "{} Upstream specification source automatically migrated: {} -> {}",
-            "ℹ".blue().bold(),
-            cfg.upstream.source,
-            canonical_source
+            "{}",
+            output::status(
+                Sym::Info,
+                format!(
+                    "Upstream specification source automatically migrated: {} -> {}",
+                    cfg.upstream.source, canonical_source
+                )
+            )
         );
     }
 
     println!(
-        "{} Resolving upstream specification for {} (current: {})...",
-        "🔍".cyan(),
-        canonical_source,
-        current_ref
+        "{}",
+        output::status(
+            Sym::Info,
+            format!(
+                "Resolving upstream specification for {} (current: {})...",
+                canonical_source, current_ref
+            )
+        )
     );
 
     let target_tag = match target {
@@ -562,7 +731,7 @@ pub fn update_repo(
              \x20  Current CLI : v{} (supports spec major {})\n\
              \x20  Requested   : {}\n\
              \x20  Action      : upgrade the CLI first — 'docgov self update' or your package manager.",
-            "error[COMPAT]:".red().bold(),
+            output::red("error[COMPAT]:"),
             target_tag,
             env!("CARGO_PKG_VERSION"),
             SUPPORTED_SPEC_MAJOR,
@@ -578,17 +747,23 @@ pub fn update_repo(
             if !force && !migrated {
                 if check {
                     println!(
-                        "{} Upstream specification is up to date: {}",
-                        "✔".green().bold(),
-                        current_ref
+                        "{}",
+                        output::status(
+                            Sym::Success,
+                            format!("Upstream specification is up to date: {}", current_ref)
+                        )
                     );
                     return Ok(0);
                 }
                 println!(
-                    "{} Repository specification is already up to date: {} ({})",
-                    "✔".green().bold(),
-                    current_ref,
-                    canonical_source
+                    "{}",
+                    output::status(
+                        Sym::Success,
+                        format!(
+                            "Repository specification is already up to date: {} ({})",
+                            current_ref, canonical_source
+                        )
+                    )
                 );
                 return Ok(0);
             }
@@ -597,18 +772,26 @@ pub fn update_repo(
             if !force && !migrated {
                 if check {
                     println!(
-                        "{} Local specification is ahead of target: {} > {}",
-                        "✔".green().bold(),
-                        current_ref,
-                        target_tag
+                        "{}",
+                        output::status(
+                            Sym::Success,
+                            format!(
+                                "Local specification is ahead of target: {} > {}",
+                                current_ref, target_tag
+                            )
+                        )
                     );
                     return Ok(0);
                 }
                 println!(
-                    "{} Repository specification ({}) is newer than target ({}) (use --force to downgrade)",
-                    "~".yellow().bold(),
-                    current_ref,
-                    target_tag
+                    "{}",
+                    output::status(
+                        Sym::Update,
+                        format!(
+                            "Repository specification ({}) is newer than target ({}) (use --force to downgrade)",
+                            current_ref, target_tag
+                        )
+                    )
                 );
                 return Ok(0);
             }
@@ -619,10 +802,14 @@ pub fn update_repo(
     // New version detected or forced
     if check {
         println!(
-            "{} New specification version available: {} -> {} (Run 'docgov update' to upgrade)",
-            "ℹ".blue().bold(),
-            current_ref,
-            target_tag
+            "{}",
+            output::status(
+                Sym::Info,
+                format!(
+                    "New specification version available: {} -> {} (Run 'docgov update' to upgrade)",
+                    current_ref, target_tag
+                )
+            )
         );
         return Ok(1); // Standard check mode: return non-zero exit code when updates are available
     }
@@ -630,8 +817,8 @@ pub fn update_repo(
     if dry_run {
         println!();
         println!(
-            "{} Specification Upgrade Preview (dry run):",
-            "~".yellow().bold()
+            "{}",
+            output::status(Sym::Update, "Specification Upgrade Preview (dry run):")
         );
         println!("   Upstream: {}", canonical_source);
         if migrated {
@@ -645,10 +832,15 @@ pub fn update_repo(
 
     println!();
     println!(
-        "{} Upgrading specification: {} -> {}",
-        "🚀".bold(),
-        current_ref.yellow(),
-        target_tag.green().bold()
+        "{}",
+        output::status(
+            Sym::Info,
+            format!(
+                "Upgrading specification: {} -> {}",
+                output::yellow(&current_ref),
+                output::green(&target_tag)
+            )
+        )
     );
 
     // 1. Non-invasively patch .docgov.yml with atomic rollback protection
@@ -668,9 +860,14 @@ pub fn update_repo(
         let patched = patch_yaml_version_ref_and_source(orig, &target_ver, &target_tag, new_source);
         std::fs::write(&docgov_yml_path, patched)?;
         println!(
-            "{} Updated specification declaration in {}",
-            "~".yellow().bold(),
-            docgov_yml_path.display()
+            "{}",
+            output::status(
+                Sym::Update,
+                format!(
+                    "Updated specification declaration in {}",
+                    docgov_yml_path.display()
+                )
+            )
         );
     }
 
@@ -684,14 +881,24 @@ pub fn update_repo(
 
     println!();
     println!(
-        "{} Successfully updated specification to {}!",
-        "✨".green().bold(),
-        target_tag.green().bold()
+        "{}",
+        output::status(
+            Sym::Success,
+            format!(
+                "Successfully updated specification to {}!",
+                output::green(&target_tag)
+            )
+        )
     );
     println!(
-        "{} Run '{}' to verify repository compliance under the new specification.",
-        "💡".cyan(),
-        "docgov check".bold()
+        "{}",
+        output::status(
+            Sym::Info,
+            format!(
+                "Run '{}' to verify repository compliance under the new specification.",
+                output::bold("docgov check")
+            )
+        )
     );
 
     Ok(0)
@@ -755,6 +962,9 @@ fn check_for_spec_update_hint(dir: &std::path::Path, cfg: &Config) {
         return;
     }
     use std::io::IsTerminal;
+    // Advisory chatter is only ever printed to an interactive terminal, and only in
+    // `text` mode — it must never contaminate a machine-readable stream. Callers that
+    // request `github`/`json` therefore skip this hint entirely.
     if !std::io::stdout().is_terminal() {
         return;
     }
@@ -774,10 +984,15 @@ fn check_for_spec_update_hint(dir: &std::path::Path, cfg: &Config) {
         if crate::remote::compare_semver(target_ver, current_ver) == std::cmp::Ordering::Greater {
             println!();
             println!(
-                "{} A new governance specification is available: {} -> {} (Run 'docgov update' to upgrade)",
-                "💡".cyan().bold(),
-                current_ref.yellow(),
-                info.tag_name.green().bold()
+                "{}",
+                output::status(
+                    Sym::Info,
+                    format!(
+                        "A new governance specification is available: {} -> {} (Run 'docgov update' to upgrade)",
+                        output::yellow(current_ref),
+                        output::green(&info.tag_name)
+                    )
+                )
             );
         }
     }

@@ -63,7 +63,8 @@ pub fn patch_agent_directives(
     snippet: &str,
 ) -> (String, PatchAction) {
     let snippet = snippet.trim();
-    let detected_heading = extract_primary_heading(snippet).unwrap_or("## Documentation Governance Directives");
+    let detected_heading =
+        extract_primary_heading(snippet).unwrap_or("## Documentation Governance Directives");
 
     match existing_content {
         None => {

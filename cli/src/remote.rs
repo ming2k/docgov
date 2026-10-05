@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use colored::Colorize;
 use flate2::read::GzDecoder;
 use std::fs;
 use std::io::Read;
@@ -423,9 +422,14 @@ impl RemoteClient {
                     )
                 })?;
                 println!(
-                    "{} Using local specification directives ({})",
-                    "✔".green().bold(),
-                    candidate_file.display()
+                    "{}",
+                    crate::output::status(
+                        crate::output::Sym::Info,
+                        format!(
+                            "Using local specification directives ({})",
+                            candidate_file.display()
+                        )
+                    )
                 );
                 return Ok((content, format!("local:{}", candidate_file.display())));
             }
@@ -439,9 +443,11 @@ impl RemoteClient {
             if let Ok(content) = fs::read_to_string(&cache_file) {
                 if !content.trim().is_empty() {
                     println!(
-                        "{} Cached remote assets hit ({})",
-                        "✔".green().bold(),
-                        cache_file.display()
+                        "{}",
+                        crate::output::status(
+                            crate::output::Sym::Success,
+                            format!("Cached remote assets hit ({})", cache_file.display())
+                        )
                     );
                     return Ok((content, "cache".to_string()));
                 }
@@ -457,9 +463,11 @@ impl RemoteClient {
                     let _ = fs::create_dir_all(&cache_dir);
                     let _ = fs::write(&cache_file, &content);
                     println!(
-                        "{} Fetched remote directives from {}",
-                        "✔".green().bold(),
-                        url
+                        "{}",
+                        crate::output::status(
+                            crate::output::Sym::Success,
+                            format!("Fetched remote directives from {}", url)
+                        )
                     );
                     return Ok((content, url.clone()));
                 }
@@ -505,9 +513,14 @@ impl RemoteClient {
 
         let tar_bytes: Vec<u8> = if !force && cache_tar.exists() {
             println!(
-                "{} Using cached governance documentation archive ({})",
-                "✔".green().bold(),
-                cache_tar.display()
+                "{}",
+                crate::output::status(
+                    crate::output::Sym::Success,
+                    format!(
+                        "Using cached governance documentation archive ({})",
+                        cache_tar.display()
+                    )
+                )
             );
             fs::read(&cache_tar)?
         } else {
@@ -554,9 +567,11 @@ impl RemoteClient {
                         let _ = fs::create_dir_all(&cache_dir);
                         let _ = fs::write(&cache_tar, &bytes);
                         println!(
-                            "{} Downloaded governance documentation assets from {}",
-                            "✔".green().bold(),
-                            url
+                            "{}",
+                            crate::output::status(
+                                crate::output::Sym::Success,
+                                format!("Downloaded governance documentation assets from {}", url)
+                            )
                         );
                         downloaded = Some(bytes);
                         break;
@@ -647,9 +662,14 @@ impl RemoteClient {
         }
 
         println!(
-            "{} Atomically synchronized and pruned canonical governance documentation into {}",
-            "✔".green().bold(),
-            target_dir.display()
+            "{}",
+            crate::output::status(
+                crate::output::Sym::Success,
+                format!(
+                    "Atomically synchronized and pruned canonical governance documentation into {}",
+                    target_dir.display()
+                )
+            )
         );
 
         Ok(archive_hash)
@@ -686,9 +706,14 @@ impl RemoteClient {
 
         let hash = compute_dir_sha256(target_dir)?;
         println!(
-            "{} Atomically synchronized local governance specification into {}",
-            "✔".green().bold(),
-            target_dir.display()
+            "{}",
+            crate::output::status(
+                crate::output::Sym::Success,
+                format!(
+                    "Atomically synchronized local governance specification into {}",
+                    target_dir.display()
+                )
+            )
         );
 
         Ok(hash)
