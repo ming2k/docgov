@@ -26,7 +26,7 @@ pub const SUPPORTED_SPEC_MAJOR: u64 = 0;
     name = "docgov",
     version,
     about = "High-performance, zero-vendoring documentation and architecture governance linter",
-    long_about = "A fast, deterministic compiler-grade linter for Protocol v0.0.1 documentation governance and system invariants."
+    long_about = "A fast, deterministic compiler-grade linter for documentation governance and system invariants."
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -178,7 +178,13 @@ pub fn run() -> Result<i32> {
 
             let duration = start.elapsed();
 
-            output_diagnostics(&diagnostics, cli.format, duration, suppressed_count);
+            output_diagnostics(
+                &diagnostics,
+                cli.format,
+                duration,
+                suppressed_count,
+                &engine.config.version,
+            );
 
             let error_count = diagnostics
                 .iter()
@@ -212,7 +218,7 @@ pub fn run() -> Result<i32> {
             let diagnostics = rule.check(&ctx)?;
             let duration = start.elapsed();
 
-            output_diagnostics(&diagnostics, cli.format, duration, 0);
+            output_diagnostics(&diagnostics, cli.format, duration, 0, &engine.config.version);
 
             let error_count = diagnostics
                 .iter()
@@ -250,21 +256,24 @@ fn output_diagnostics(
     format: OutputFormat,
     duration: std::time::Duration,
     suppressed_count: usize,
+    protocol_version: &str,
 ) {
     match format {
         OutputFormat::Text => {
             if diagnostics.is_empty() {
                 if suppressed_count > 0 {
                     println!(
-                        "{} All Protocol v0.0.1 documentation invariants verified in {:.3}s. (Suppressed {} known baseline violation(s))",
+                        "{} All Protocol v{} documentation invariants verified in {:.3}s. (Suppressed {} known baseline violation(s))",
                         "✔".green().bold(),
+                        protocol_version,
                         duration.as_secs_f64(),
                         suppressed_count
                     );
                 } else {
                     println!(
-                        "{} All Protocol v0.0.1 documentation invariants verified in {:.3}s.",
+                        "{} All Protocol v{} documentation invariants verified in {:.3}s.",
                         "✔".green().bold(),
+                        protocol_version,
                         duration.as_secs_f64()
                     );
                 }
@@ -327,11 +336,11 @@ fn init_repo(dir: &std::path::Path, force: bool) -> Result<()> {
             Ok((content, _)) => content,
             Err(_) => {
                 // Minimal standalone fallback only if completely unreachable
-                r#"version: "0.0.1"
+                r#"version: "0.0.2"
 
 upstream:
   source: "https://github.com/ming2k/docgov"
-  ref: "v0.0.1"
+  ref: "v0.0.2"
 
 governance_docs:
   install: true

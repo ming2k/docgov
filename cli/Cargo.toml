@@ -1,6 +1,6 @@
 [package]
 name = "docgov"
-version = "0.0.2"
+version = "0.0.3"
 edition = "2021"
 default-run = "docgov"
 description = "High-performance, zero-vendoring documentation and architecture governance linter"

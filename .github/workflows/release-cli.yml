@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "CLI tag to release (e.g. v0.0.2)"
+        description: "CLI tag to release (e.g. v0.0.3)"
         required: false
-        default: "v0.0.2"
+        default: "v0.0.3"
 
 permissions:
   contents: write
