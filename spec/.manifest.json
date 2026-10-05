@@ -5,12 +5,18 @@
   "description": "Universal documentation governance: semantic coordinate tensor core with pluggable vertical domain entities.",
   "license": "MIT",
   "homepage": "https://github.com/ming2k/docgov",
-  "protocol_version": "0.0.1",
+  "protocol_version": "0.0.2",
   "protocol_history": [
+    {
+      "version": "0.0.2",
+      "date": "2026-10-05",
+      "status": "current",
+      "summary": "Protocol v0.0.2: Distributes the canonical .docgov.yml adoption template (spec/default-config.yml) as a first-class, manifest-registered spec asset, enabling `docgov init` to materialize configuration directly from the sovereign specification rather than hard-coding it in the engine."
+    },
     {
       "version": "0.0.1",
       "date": "2026-10-02",
-      "status": "current",
+      "status": "superseded",
       "summary": "Protocol v0.0.1 Initial Release: Zero-Vendoring Architecture, Flat Knowledge Topology, in-place Frontmatter lifecycle, and bifurcated invariants (INV-LINT machine layer and INV-AGENT cognitive layer)."
     }
   ],
@@ -20,13 +26,13 @@
       "role": "charter",
       "profile": "core",
       "editable": false,
-      "sha256": "64013eec2ac263814a9275668be68bf0b69ffebb94d5eac03dd2ea593a32497e"
+      "sha256": "a2f9325f4f31d4a16b46afdc518a6644e71d8e8af5269789692b539785198e49"
     },
     "core/invariants.md": {
       "role": "constitution",
       "profile": "core",
       "editable": false,
-      "sha256": "1dc779f7655bb529ee465c956d886af813185795ad91b07c422aa1e6fbb04ba8"
+      "sha256": "e2b366733e77abfadca087cde99fa20332056bad1884c5699f174802a54ccd7c"
     },
     "core/style.md": {
       "role": "guide",
@@ -38,13 +44,13 @@
       "role": "tensor",
       "profile": "core",
       "editable": false,
-      "sha256": "06be77ebd061eaf739273802317b5cda41e7160e5dc16fb80b3d9d7bbc732e6e"
+      "sha256": "cd93da9eed4687eb9d1511d1cc42b48653b72b7a3a377a5c9e5a8864dd081b1a"
     },
     "core/workflow.md": {
       "role": "lifecycle",
       "profile": "core",
       "editable": false,
-      "sha256": "bba4f7fc3fba2f75d24c218e8a7533a1abdfb698cb55fce404dfe07a46873414"
+      "sha256": "e891f60cb442a343ea608b488fe8407f7e29383d3309651729a45162ef1cb849"
     },
     "profiles/architecture/adr.md": {
       "role": "entity",
@@ -56,7 +62,7 @@
       "role": "charter",
       "profile": "architecture",
       "editable": false,
-      "sha256": "16431fad3816959b053c9e7d8f2073febdfbf389b06286d1f1b3805bfb0c6936"
+      "sha256": "b80e78af89b5229a11a1df0e222268cec6211d1649a127075073782604d30d5d"
     },
     "profiles/architecture/living-snapshot.md": {
       "role": "entity",
@@ -74,7 +80,7 @@
       "role": "charter",
       "profile": "operations",
       "editable": false,
-      "sha256": "735252f455b6b453092e61e98b78dc00e86f07e111abc64a925579b628bc2a1c"
+      "sha256": "64d0f0461cfc46d13599292c4e4dda7ff173c08fef0b90269971b072c3bd15d8"
     },
     "profiles/operations/postmortem.md": {
       "role": "entity",
@@ -86,13 +92,13 @@
       "role": "entity",
       "profile": "validation",
       "editable": false,
-      "sha256": "ee6e546e835335f8e896410bc8a4d9e981b94a51a5ce6135a796b7f22d893121"
+      "sha256": "1e78c51a2896ec7cd312014a5e4634e4c4a3fd7db8491445a39db21039e9d739"
     },
     "profiles/validation/index.md": {
       "role": "charter",
       "profile": "validation",
       "editable": false,
-      "sha256": "1698410d19e2e196bd9cdf226ef41eb2af9ab6bf8551266d756cc4fad4596684"
+      "sha256": "21b4022d31a697e05b0f667bd2ca5f94b8b6c688f3997a36ee95d3114829a95a"
     },
     "profiles/validation/testing.md": {
       "role": "entity",
@@ -104,7 +110,7 @@
       "role": "template",
       "profile": "core",
       "editable": false,
-      "sha256": "7cec37f50c3e6ace01958f88ec613c3687834de0baae0ada7b42b4082830ff35"
+      "sha256": "b8295b3bd6fb15d7b28f7359c7a1f79e6688bfe3b0e8c12752bd2c7708a0b6e4"
     }
   }
 }

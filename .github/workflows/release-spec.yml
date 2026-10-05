@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: "Spec tag to release (e.g. spec-v0.0.1)"
+        description: "Spec tag to release (e.g. spec-v0.0.2)"
         required: false
-        default: "spec-v0.0.1"
+        default: "spec-v0.0.2"
 
 permissions:
   contents: write
@@ -29,7 +29,7 @@ jobs:
           else
             REF_NAME="${GITHUB_REF_NAME}"
           fi
-          # Extract clean version, e.g. spec-v0.0.1 -> 0.0.1
+          # Extract clean version, e.g. spec-v0.0.2 -> 0.0.2
           CLEAN_VER="${REF_NAME#spec-v}"
           CLEAN_VER="${CLEAN_VER#spec-}"
           CLEAN_VER="${CLEAN_VER#v}"

@@ -1,8 +1,8 @@
-# Documentation Governance Core (Protocol v0.0.1)
+# Documentation Governance Core (Protocol v0.0.2)
 
 Universal meta-governance protocol and verification standard for software engineering repositories.
 
-This specification implements the **Zero-Vendoring, Flat-Topology Architecture** (Protocol v0.0.1): combining deterministic machine-layer AST enforcement (`INV-LINT-*`) with cognitive agent protocols (`INV-AGENT-*`).
+This specification implements the **Zero-Vendoring, Flat-Topology Architecture** (Protocol v0.0.2): combining deterministic machine-layer AST enforcement (`INV-LINT-*`) with cognitive agent protocols (`INV-AGENT-*`).
 
 ---
 

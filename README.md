@@ -23,7 +23,7 @@ docgov/
 │   │   └── ...
 │   └── tests/                  # Integration test suites
 └── spec/                       # Sovereign specification standard
-    ├── VERSION                 # Protocol specification version (0.0.1)
+    ├── VERSION                 # Protocol specification version (0.0.2)
     ├── .manifest.json          # Cryptographic SHA-256 asset catalog
     ├── directives.snippet      # Canonical AI agent directives block
     ├── core/                   # Semantic Tensor Core
