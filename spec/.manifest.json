@@ -5,12 +5,18 @@
   "description": "Universal documentation governance: semantic coordinate tensor core with pluggable vertical domain entities.",
   "license": "MIT",
   "homepage": "https://github.com/ming2k/docgov",
-  "protocol_version": "0.0.2",
+  "protocol_version": "0.0.3",
   "protocol_history": [
+    {
+      "version": "0.0.3",
+      "date": "2026-03-31",
+      "status": "current",
+      "summary": "Protocol v0.0.3: Distributes pre-decision RFC governance architecture standard (RFC-0002), aligns core system invariant headers, and locks protocol assets."
+    },
     {
       "version": "0.0.2",
       "date": "2026-10-05",
-      "status": "current",
+      "status": "superseded",
       "summary": "Protocol v0.0.2: Distributes the canonical .docgov.yml adoption template (spec/default-config.yml) as a first-class, manifest-registered spec asset, enabling `docgov init` to materialize configuration directly from the sovereign specification rather than hard-coding it in the engine."
     },
     {
@@ -26,13 +32,13 @@
       "role": "charter",
       "profile": "core",
       "editable": false,
-      "sha256": "a2f9325f4f31d4a16b46afdc518a6644e71d8e8af5269789692b539785198e49"
+      "sha256": "187e855f8af69cf20e0980dac8809674162fd1e6cf1ed264725715a241308658"
     },
     "core/invariants.md": {
       "role": "constitution",
       "profile": "core",
       "editable": false,
-      "sha256": "e2b366733e77abfadca087cde99fa20332056bad1884c5699f174802a54ccd7c"
+      "sha256": "c0e8ff6cc67f7b8bd0de72358114d938e5b64c7e04394a96e358926b4468afb0"
     },
     "core/style.md": {
       "role": "guide",
@@ -44,13 +50,13 @@
       "role": "tensor",
       "profile": "core",
       "editable": false,
-      "sha256": "cd93da9eed4687eb9d1511d1cc42b48653b72b7a3a377a5c9e5a8864dd081b1a"
+      "sha256": "ca9c6420f46666be1fb2fed0cddaf8065bf37372b7f38846536ccb46a7c5d846"
     },
     "core/workflow.md": {
       "role": "lifecycle",
       "profile": "core",
       "editable": false,
-      "sha256": "e891f60cb442a343ea608b488fe8407f7e29383d3309651729a45162ef1cb849"
+      "sha256": "05dff7d67612e89f6523a95490980a85e1cbf305134b5f05554f76024cbdea55"
     },
     "profiles/architecture/adr.md": {
       "role": "entity",
@@ -110,7 +116,7 @@
       "role": "template",
       "profile": "core",
       "editable": false,
-      "sha256": "b8295b3bd6fb15d7b28f7359c7a1f79e6688bfe3b0e8c12752bd2c7708a0b6e4"
+      "sha256": "5fe5fc365bc66575a45eda1a4fbee694f1f5a14fe5f0f29fa6cb3316b13b6275"
     }
   }
 }
