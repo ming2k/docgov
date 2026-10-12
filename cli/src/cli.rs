@@ -25,7 +25,7 @@ pub const SUPPORTED_SPEC_MAJOR: u64 = 0;
 
 /// The compiled engine version, single-sourced from `Cargo.toml`.
 ///
-/// This is exposed as a machine-readable, bare semantic version string (e.g. `0.0.4`)
+/// This is exposed as a machine-readable, bare semantic version string (e.g. `0.0.5`)
 /// so release tooling and scripts can parse stdout directly without stripping a
 /// program-name prefix.
 pub const CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
