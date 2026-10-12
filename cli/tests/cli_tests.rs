@@ -461,6 +461,10 @@ fn test_remote_client_fails_deterministically_without_embedded_fallback() {
         err_msg.contains("Failed to fetch directives snippet for upstream"),
         "Error message must be clear: {err_msg}"
     );
+    assert!(
+        err_msg.contains("Hint: 'v99.99.99' appears to be a CLI engine release tag"),
+        "Diagnostic must provide helpful hint when ref looks like a CLI release: {err_msg}"
+    );
 
     // Syncing governance docs must fail explicitly without embedded tar fallback!
     let sync_res = client.sync_governance_docs(root, "docs/governance/documentation", true);

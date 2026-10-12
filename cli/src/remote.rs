@@ -124,6 +124,8 @@ impl RemoteClient {
         }
 
         let (owner, repo) = self.parse_owner_repo();
+        let is_canonical_monorepo =
+            (owner == "ming2k" && repo == "docgov") || self.source.contains("ming2k/docgov");
 
         let is_explicit_spec_tag = |tag: &str| -> bool {
             let t = tag.trim();
@@ -174,7 +176,7 @@ impl RemoteClient {
         // 3. Fallback to GitHub REST API: query releases list to find latest specification release
         // (especially vital for monorepos where /releases/latest is the CLI engine release).
         let api_url = format!(
-            "https://api.github.com/repos/{}/{}/releases?per_page=20",
+            "https://api.github.com/repos/{}/{}/releases?per_page=100",
             owner, repo
         );
         let resp = ureq::get(&api_url)
@@ -202,17 +204,20 @@ impl RemoteClient {
 
         // Pass 2: In case upstream is a dedicated standalone spec repository (standard v* tags),
         // fallback to the first release not prefixed with "cli-"
-        for rel in &releases {
-            if let Some(raw_tag) = rel["tag_name"].as_str() {
-                let trimmed = raw_tag.trim();
-                if !trimmed.starts_with("cli-") {
-                    let published_at = rel["published_at"].as_str().map(|s| s.to_string());
-                    let html_url = rel["html_url"].as_str().map(|s| s.to_string());
-                    return Ok(LatestReleaseInfo {
-                        tag_name: normalize_tag(raw_tag),
-                        published_at,
-                        html_url,
-                    });
+        // Strictly skipped for canonical monorepo (ming2k/docgov) where CLI engine releases use plain v* tags!
+        if !is_canonical_monorepo {
+            for rel in &releases {
+                if let Some(raw_tag) = rel["tag_name"].as_str() {
+                    let trimmed = raw_tag.trim();
+                    if !trimmed.starts_with("cli-") {
+                        let published_at = rel["published_at"].as_str().map(|s| s.to_string());
+                        let html_url = rel["html_url"].as_str().map(|s| s.to_string());
+                        return Ok(LatestReleaseInfo {
+                            tag_name: normalize_tag(raw_tag),
+                            published_at,
+                            html_url,
+                        });
+                    }
                 }
             }
         }
@@ -488,14 +493,25 @@ impl RemoteClient {
             .map(|u| format!("- {}", u))
             .collect::<Vec<_>>()
             .join("\n");
+        let hint = if !self.r#ref.starts_with("spec-") && !self.r#ref.starts_with("local") {
+            format!(
+                "\nHint: '{}' appears to be a CLI engine release tag rather than a specification release tag.\n\
+                 In docgov, specification releases use 'spec-vX.X.X' tags (e.g. 'spec-v0.0.3').\n\
+                 Ensure `upstream.ref` in .docgov.yml points to a published specification version.",
+                self.r#ref
+            )
+        } else {
+            String::new()
+        };
         anyhow::bail!(
             "Failed to fetch directives snippet for upstream '{}' (ref: '{}').\n\
              Endpoints attempted:\n\
              {}\n\
-             Asset not found in local cache or remote endpoints. Please check network connectivity or upstream release status.",
+             Asset not found in local cache or remote endpoints. Please check network connectivity or upstream release status.{}",
             self.source,
             self.r#ref,
-            attempted_list
+            attempted_list,
+            hint
         );
     }
 
@@ -592,15 +608,26 @@ impl RemoteClient {
             match downloaded {
                 Some(bytes) => bytes,
                 None => {
+                    let hint = if !self.r#ref.starts_with("spec-")
+                        && !self.r#ref.starts_with("local")
+                    {
+                        format!(
+                            "\nHint: '{}' appears to be a CLI engine release tag. Upstream specification releases are published under 'spec-vX.X.X'.",
+                            self.r#ref
+                        )
+                    } else {
+                        String::new()
+                    };
                     anyhow::bail!(
                         "Failed to download governance documentation assets for upstream '{}/{}' (ref: '{}').\n\
                          Details:\n{}\n\
-                         Release asset 'docgov-spec-{}.tar.gz' or 'docgov-assets.tar.gz' is unreachable. Ensure the release exists and assets are published.",
+                         Release asset 'docgov-spec-{}.tar.gz' or 'docgov-assets.tar.gz' is unreachable. Ensure the release exists and assets are published.{}",
                         owner,
                         repo,
                         self.r#ref,
                         last_err.unwrap_or_default(),
-                        clean_ver
+                        clean_ver,
+                        hint
                     );
                 }
             }
