@@ -309,6 +309,13 @@ impl RemoteClient {
             }
             return Some(ws_relative);
         }
+
+        // Monorepo root check: workspace itself contains spec/ with VERSION & directives.snippet
+        let ws_spec = workspace_root.join("spec");
+        if ws_spec.join("directives.snippet").is_file() && ws_spec.join("VERSION").is_file() {
+            return Some(ws_spec);
+        }
+
         None
     }
 

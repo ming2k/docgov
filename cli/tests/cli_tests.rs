@@ -273,10 +273,10 @@ fn test_patch_agent_directives_preserves_single_h1_and_existing_content() {
     assert_eq!(reこと, patched);
 
     // Test update: modifying the interior of the marker block is cleanly updated
-    let mutated = patched.replace("### 1. Machine Invariants", "### 1. Outdated Invariants");
+    let mutated = patched.replace("### 1. Hard Constraints", "### 1. Outdated Invariants");
     let (updated, action3) = patch_agent_directives(Some(&mutated), SAMPLE_SNIPPET);
     assert_eq!(action3, PatchAction::Updated);
-    assert!(updated.contains("### 1. Machine Invariants"));
+    assert!(updated.contains("### 1. Hard Constraints"));
     assert!(!updated.contains("### 1. Outdated Invariants"));
     assert!(updated.starts_with(original.trim_end()));
 
@@ -1313,4 +1313,129 @@ fn test_binary_color_never_strips_all_escapes() {
     assert!(plain.contains("[INV-LINT-01]"));
     // The severity glyph must be present so findings stay scannable without color.
     assert!(plain.contains('×'), "missing severity glyph: {plain:?}");
+}
+
+#[test]
+fn test_delimiter_whitespace_tolerance() {
+    use docgov::rules::lint_05_agent_directives::{
+        extract_directives_block, find_begin_delimiter_span, find_end_delimiter_span,
+    };
+
+    let sample_relaxed = "# Directives\n\n<!--   BEGIN DOCGOV DIRECTIVES   -->\n## Documentation Governance Directives\nContent here\n<!--   END DOCGOV DIRECTIVES   -->\n";
+    assert!(find_begin_delimiter_span(sample_relaxed).is_some());
+    assert!(find_end_delimiter_span(sample_relaxed).is_some());
+
+    let extracted = extract_directives_block(sample_relaxed);
+    assert!(extracted.is_some());
+    let block = extracted.unwrap();
+    assert!(block.contains("BEGIN DOCGOV DIRECTIVES"));
+    assert!(block.contains("END DOCGOV DIRECTIVES"));
+}
+
+#[test]
+fn test_docgov_fix_command_repairs_directives() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+
+    // Create a local spec fixture
+    let spec_dir = root.join("spec");
+    fs::create_dir_all(&spec_dir).unwrap();
+    fs::write(spec_dir.join("VERSION"), "0.0.3\n").unwrap();
+    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
+
+    let config = r#"version: "0.0.3"
+upstream:
+  source: "."
+  ref: "v0.0.3"
+governance_docs:
+  install: false
+agent_directives:
+  enforce: true
+  targets:
+    - "AGENTS.md"
+"#;
+    fs::write(root.join(".docgov.yml"), config).unwrap();
+
+    // Corrupted AGENTS.md missing end delimiter tag
+    let corrupted_agents = "# Project Instructions\n\n<!-- BEGIN DOCGOV DIRECTIVES -->\n## Documentation Governance Directives\nCorrupted content without closing delimiter\n";
+    fs::write(root.join("AGENTS.md"), corrupted_agents).unwrap();
+
+    // Running check initially fails
+    let check_before = std::process::Command::new(env!("CARGO_BIN_EXE_docgov"))
+        .arg("--path")
+        .arg(root)
+        .arg("check")
+        .output()
+        .expect("failed to run docgov");
+    assert!(!check_before.status.success());
+
+    // Running fix repairs the boundary tags
+    let fix_output = std::process::Command::new(env!("CARGO_BIN_EXE_docgov"))
+        .arg("--path")
+        .arg(root)
+        .arg("fix")
+        .output()
+        .expect("failed to run docgov fix");
+    assert!(fix_output.status.success());
+
+    // Running check now passes
+    let check_after = std::process::Command::new(env!("CARGO_BIN_EXE_docgov"))
+        .arg("--path")
+        .arg(root)
+        .arg("check")
+        .output()
+        .expect("failed to run docgov check");
+    assert!(check_after.status.success());
+}
+
+#[test]
+fn test_docgov_yml_sole_declarative_source_of_truth() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+
+    // Create local spec fixture with version 0.0.3
+    let spec_dir = root.join("spec");
+    fs::create_dir_all(&spec_dir).unwrap();
+    fs::write(spec_dir.join("VERSION"), "0.0.3\n").unwrap();
+    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
+
+    // .docgov.yml declares v0.0.3
+    let config = r#"version: "0.0.3"
+upstream:
+  source: "."
+  ref: "v0.0.3"
+governance_docs:
+  install: false
+agent_directives:
+  enforce: false
+"#;
+    fs::write(root.join(".docgov.yml"), config).unwrap();
+
+    // Create a stale lockfile that still declares v0.0.1
+    let stale_lock = r#"schema: 1
+protocol_version: "0.0.1"
+upstream:
+  source: "."
+  ref: "v0.0.1"
+  synced_at: "2026-01-01T00:00:00Z"
+artifacts: {}
+"#;
+    fs::write(root.join(".docgov.lock"), stale_lock).unwrap();
+
+    // docgov update --check: since .docgov.yml is SSOT (v0.0.3) and target is 0.0.3,
+    // it must report that upstream is already up to date (exit code 0)!
+    // If the bug were present (reading lockfile v0.0.1), it would claim an update is available (exit code 1).
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_docgov"))
+        .arg("--path")
+        .arg(root)
+        .args(["update", "--check"])
+        .output()
+        .expect("failed to run docgov update");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "Expected .docgov.yml to be SSOT; output was: {}",
+        String::from_utf8_lossy(&output.stdout)
+    );
 }

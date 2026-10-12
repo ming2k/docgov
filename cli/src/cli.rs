@@ -103,6 +103,10 @@ pub enum Commands {
         /// Generate a baseline file containing all current diagnostics and exit 0
         #[arg(long)]
         generate_baseline: Option<PathBuf>,
+
+        /// Automatically fix repairable invariant violations in-place
+        #[arg(long)]
+        fix: bool,
     },
 
     /// Run only git-diff code-to-doc trigger matrix checks
@@ -111,6 +115,9 @@ pub enum Commands {
         #[arg(default_value = "HEAD~1")]
         base: String,
     },
+
+    /// Automatically repair repairable invariant violations (e.g. restore agent directives boundary comments)
+    Fix,
 
     /// Initialize standard .docgov.yml configuration and AGENTS.md in the current repository
     Init {
@@ -189,16 +196,23 @@ fn run_command(cli: &Cli) -> Result<i32> {
             base,
             baseline,
             generate_baseline,
-        }) => run_check(
-            &target_dir,
-            cli.format,
-            *diff,
-            base.as_deref(),
-            baseline.clone(),
-            generate_baseline.clone(),
-            cli.format == OutputFormat::Text,
-        ),
+            fix,
+        }) => {
+            if *fix {
+                run_fix(&target_dir)?;
+            }
+            run_check(
+                &target_dir,
+                cli.format,
+                *diff,
+                base.as_deref(),
+                baseline.clone(),
+                generate_baseline.clone(),
+                cli.format == OutputFormat::Text,
+            )
+        }
         Some(Commands::Diff { base }) => run_diff(&target_dir, cli.format, base),
+        Some(Commands::Fix) => run_fix(&target_dir),
         Some(Commands::Init { force }) => {
             init_repo(&target_dir, *force)?;
             Ok(0)
@@ -454,6 +468,121 @@ fn emit_fatal_error(format: OutputFormat, err: &anyhow::Error) {
     eprintln!("{} {:#}", output::red("Error:"), err);
 }
 
+pub fn run_fix(dir: &std::path::Path) -> Result<i32> {
+    let (cfg, _) = Config::load_from_dir(dir).unwrap_or((Config::default(), None));
+    let remote_client = RemoteClient::new(&cfg.upstream.source, &cfg.upstream.r#ref);
+    let (directives_content, _) = remote_client.fetch_directives(Some(dir))?;
+
+    let targets = if cfg.agent_directives.targets.is_empty() {
+        vec!["AGENTS.md".to_string()]
+    } else {
+        cfg.agent_directives.targets.clone()
+    };
+
+    let mut lock = DocgovLock::load_from_dir(dir)?.unwrap_or_else(|| {
+        DocgovLock::new(&cfg.version, &cfg.upstream.source, &cfg.upstream.r#ref)
+    });
+
+    let mut fixed_count = 0;
+    for target in &targets {
+        let target_path = dir.join(target);
+        let existing = if target_path.exists() {
+            Some(std::fs::read_to_string(&target_path)?)
+        } else {
+            None
+        };
+
+        let (new_content, action) =
+            patch_agent_directives(existing.as_deref(), &directives_content);
+
+        if let Some(block) = extract_directives_block(&new_content) {
+            let block_hash = compute_sha256(block.trim());
+            lock.artifacts.agent_directives = Some(ArtifactEntry {
+                target: target.clone(),
+                hash: block_hash,
+            });
+        }
+
+        match action {
+            PatchAction::Created => {
+                std::fs::write(&target_path, &new_content)?;
+                println!(
+                    "{}",
+                    output::status(
+                        Sym::Create,
+                        format!(
+                            "Created {} with docgov directives block",
+                            target_path.display()
+                        )
+                    )
+                );
+                fixed_count += 1;
+            }
+            PatchAction::Appended => {
+                std::fs::write(&target_path, &new_content)?;
+                println!(
+                    "{}",
+                    output::status(
+                        Sym::Create,
+                        format!(
+                            "Inserted docgov directives block into {}",
+                            target_path.display()
+                        )
+                    )
+                );
+                fixed_count += 1;
+            }
+            PatchAction::Updated => {
+                std::fs::write(&target_path, &new_content)?;
+                println!(
+                    "{}",
+                    output::status(
+                        Sym::Update,
+                        format!(
+                            "Repaired docgov directives block in {}",
+                            target_path.display()
+                        )
+                    )
+                );
+                fixed_count += 1;
+            }
+            PatchAction::Unchanged => {
+                println!(
+                    "{}",
+                    output::status(
+                        Sym::Success,
+                        format!("Directives intact in {}", target_path.display())
+                    )
+                );
+            }
+        }
+    }
+
+    lock.protocol_version = cfg.version.clone();
+    lock.upstream.source = cfg.upstream.source.clone();
+    lock.upstream.r#ref = cfg.upstream.r#ref.clone();
+    lock.save_to_dir(dir)?;
+
+    if fixed_count > 0 {
+        println!(
+            "{}",
+            output::status(
+                Sym::Success,
+                format!(
+                    "Successfully repaired {} in target workspace.",
+                    output::plural(fixed_count, "file", "files")
+                )
+            )
+        );
+    } else {
+        println!(
+            "{}",
+            output::status(Sym::Success, "All directives blocks are already compliant.")
+        );
+    }
+    Ok(0)
+}
+
 fn init_repo(dir: &std::path::Path, force: bool) -> Result<()> {
     let docgov_yml = dir.join(".docgov.yml");
 
@@ -657,16 +786,11 @@ pub fn update_repo(
         return Ok(0);
     }
     let (cfg, config_path) = Config::load_from_dir(dir).unwrap_or((Config::default(), None));
-    let lock = DocgovLock::load_from_dir(dir)?;
+    let _lock = DocgovLock::load_from_dir(dir)?;
 
-    let current_ref = lock
-        .as_ref()
-        .map(|l| l.upstream.r#ref.clone())
-        .unwrap_or_else(|| cfg.upstream.r#ref.clone());
-    let current_ver = lock
-        .as_ref()
-        .map(|l| l.protocol_version.clone())
-        .unwrap_or_else(|| cfg.version.clone());
+    // [AUTH-01] .docgov.yml is the sole declarative Source of Truth (SSOT)
+    let current_ref = cfg.upstream.r#ref.clone();
+    let current_ver = cfg.version.clone();
 
     let (canonical_source, migrated) =
         crate::remote::canonicalize_upstream_source(&cfg.upstream.source);

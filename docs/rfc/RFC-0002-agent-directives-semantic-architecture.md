@@ -1,10 +1,10 @@
 # RFC-0002: Re-architecting Agent Directives — Semantic Modernization, Robust Boundary Defense & Verification Closed-Loop
 
-- Status: Under Review
+- Status: Consensus Reached
 - Author: docgov core team
 - Created: 2026-03-31
 - Last Updated: 2026-03-31
-- Target ADR: docs/adr/0002-agent-directives-semantic-architecture.md
+- Target ADR: docs/adr/0002-authority-ssot-and-directives-modernization.md
 - Discussion: https://github.com/ming2k/docgov/discussions
 
 ---

@@ -14,27 +14,93 @@ pub enum PatchAction {
     Unchanged,
 }
 
-pub fn find_delimiter_line(text: &str, delimiter: &str) -> Option<usize> {
-    for (i, _) in text.match_indices(delimiter) {
-        let is_line_start = i == 0 || text[..i].ends_with('\n');
-        let after_idx = i + delimiter.len();
-        let is_line_end = after_idx >= text.len()
-            || text[after_idx..].starts_with('\n')
-            || text[after_idx..].starts_with("\r\n");
-        if is_line_start && is_line_end {
-            return Some(i);
+pub fn is_begin_tag(s: &str) -> bool {
+    let t = s.trim();
+    if let Some(rest) = t.strip_prefix("<!--") {
+        if let Some(inner) = rest.strip_suffix("-->") {
+            return inner.trim().eq_ignore_ascii_case("BEGIN DOCGOV DIRECTIVES");
         }
+    }
+    false
+}
+
+pub fn is_end_tag(s: &str) -> bool {
+    let t = s.trim();
+    if let Some(rest) = t.strip_prefix("<!--") {
+        if let Some(inner) = rest.strip_suffix("-->") {
+            return inner.trim().eq_ignore_ascii_case("END DOCGOV DIRECTIVES");
+        }
+    }
+    false
+}
+
+pub fn find_begin_delimiter_span(text: &str) -> Option<(usize, usize)> {
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let line_len = line.len();
+        if is_begin_tag(line) {
+            let trimmed = line.trim();
+            let leading = line.find(trimmed).unwrap_or(0);
+            return Some((offset + leading, offset + leading + trimmed.len()));
+        }
+        offset += line_len;
+    }
+    if let Some(idx) = text.find(DOCGOV_DIRECTIVES_BEGIN) {
+        return Some((idx, idx + DOCGOV_DIRECTIVES_BEGIN.len()));
     }
     None
 }
 
+pub fn find_end_delimiter_span(text: &str) -> Option<(usize, usize)> {
+    let mut offset = 0;
+    for line in text.split_inclusive('\n') {
+        let line_len = line.len();
+        if is_end_tag(line) {
+            let trimmed = line.trim();
+            let leading = line.find(trimmed).unwrap_or(0);
+            return Some((offset + leading, offset + leading + trimmed.len()));
+        }
+        offset += line_len;
+    }
+    if let Some(idx) = text.find(DOCGOV_DIRECTIVES_END) {
+        return Some((idx, idx + DOCGOV_DIRECTIVES_END.len()));
+    }
+    None
+}
+
+pub fn find_delimiter_line(text: &str, delimiter: &str) -> Option<usize> {
+    if delimiter == DOCGOV_DIRECTIVES_BEGIN {
+        find_begin_delimiter_span(text).map(|(s, _)| s)
+    } else if delimiter == DOCGOV_DIRECTIVES_END {
+        find_end_delimiter_span(text).map(|(s, _)| s)
+    } else {
+        for (i, _) in text.match_indices(delimiter) {
+            let is_line_start = i == 0 || text[..i].ends_with('\n');
+            let after_idx = i + delimiter.len();
+            let is_line_end = after_idx >= text.len()
+                || text[after_idx..].starts_with('\n')
+                || text[after_idx..].starts_with("\r\n");
+            if is_line_start && is_line_end {
+                return Some(i);
+            }
+        }
+        None
+    }
+}
+
 pub fn extract_directives_block(content: &str) -> Option<&str> {
-    let begin_idx = find_delimiter_line(content, DOCGOV_DIRECTIVES_BEGIN)
-        .or_else(|| content.find(DOCGOV_DIRECTIVES_BEGIN))?;
-    let end_rel = find_delimiter_line(&content[begin_idx..], DOCGOV_DIRECTIVES_END)
-        .or_else(|| content[begin_idx..].find(DOCGOV_DIRECTIVES_END))?;
-    let end_idx = begin_idx + end_rel + DOCGOV_DIRECTIVES_END.len();
-    Some(&content[begin_idx..end_idx])
+    let (begin_start, _) = find_begin_delimiter_span(content).or_else(|| {
+        content
+            .find(DOCGOV_DIRECTIVES_BEGIN)
+            .map(|i| (i, i + DOCGOV_DIRECTIVES_BEGIN.len()))
+    })?;
+    let (_, end_rel_end) = find_end_delimiter_span(&content[begin_start..]).or_else(|| {
+        content[begin_start..]
+            .find(DOCGOV_DIRECTIVES_END)
+            .map(|i| (i, i + DOCGOV_DIRECTIVES_END.len()))
+    })?;
+    let end_idx = begin_start + end_rel_end;
+    Some(&content[begin_start..end_idx])
 }
 
 fn find_next_major_heading(text: &str) -> Option<usize> {
@@ -65,6 +131,11 @@ pub fn patch_agent_directives(
     let snippet = snippet.trim();
     let detected_heading =
         extract_primary_heading(snippet).unwrap_or("## Documentation Governance Directives");
+    let clean_heading = detected_heading
+        .split("<!--")
+        .next()
+        .unwrap_or(detected_heading)
+        .trim();
 
     match existing_content {
         None => {
@@ -78,17 +149,15 @@ pub fn patch_agent_directives(
                 return (content, PatchAction::Created);
             }
 
-            let begin_opt = find_delimiter_line(text, DOCGOV_DIRECTIVES_BEGIN)
-                .or_else(|| text.find(DOCGOV_DIRECTIVES_BEGIN));
+            let begin_opt = find_begin_delimiter_span(text);
 
-            if let Some(begin_idx) = begin_opt {
-                let end_opt = find_delimiter_line(&text[begin_idx..], DOCGOV_DIRECTIVES_END)
-                    .or_else(|| text[begin_idx..].find(DOCGOV_DIRECTIVES_END));
-                if let Some(end_rel) = end_opt {
-                    let end_idx = begin_idx + end_rel + DOCGOV_DIRECTIVES_END.len();
-                    let before = &text[..begin_idx];
+            if let Some((begin_start, begin_end)) = begin_opt {
+                let end_opt = find_end_delimiter_span(&text[begin_start..]);
+                if let Some((_, end_rel_end)) = end_opt {
+                    let end_idx = begin_start + end_rel_end;
+                    let before = &text[..begin_start];
                     let after = &text[end_idx..];
-                    let current_block = &text[begin_idx..end_idx];
+                    let current_block = &text[begin_start..end_idx];
                     if current_block.trim() == snippet {
                         return (text.to_string(), PatchAction::Unchanged);
                     }
@@ -99,18 +168,16 @@ pub fn patch_agent_directives(
                     return (result, PatchAction::Updated);
                 } else {
                     // Delimiter begin exists, but closing delimiter was stripped
-                    let remaining = &text[begin_idx + DOCGOV_DIRECTIVES_BEGIN.len()..];
-                    let search_start = if let Some(h_idx) = remaining.find(detected_heading) {
-                        h_idx + detected_heading.len()
+                    let remaining = &text[begin_end..];
+                    let search_start = if let Some(h_idx) = remaining.find(clean_heading) {
+                        h_idx + clean_heading.len()
                     } else {
                         0
                     };
                     let end_idx = find_next_major_heading(&remaining[search_start..])
-                        .map(|offset| {
-                            begin_idx + DOCGOV_DIRECTIVES_BEGIN.len() + search_start + offset
-                        })
+                        .map(|offset| begin_end + search_start + offset)
                         .unwrap_or(text.len());
-                    let before = text[..begin_idx].trim_end();
+                    let before = text[..begin_start].trim_end();
                     let after = text[end_idx..].trim_start_matches('\n');
                     let mut result = String::new();
                     if !before.is_empty() {
@@ -127,17 +194,22 @@ pub fn patch_agent_directives(
                 }
             }
 
-            // Case: Delimiters missing, but directive heading exists (AI stripped delimiters/reorganized)
-            if let Some(head_idx) = text.find(detected_heading) {
-                let after_head = &text[head_idx + detected_heading.len()..];
-                let end_idx = if let Some(end_rel) =
-                    find_delimiter_line(after_head, DOCGOV_DIRECTIVES_END)
-                        .or_else(|| after_head.find(DOCGOV_DIRECTIVES_END))
-                {
-                    head_idx + detected_heading.len() + end_rel + DOCGOV_DIRECTIVES_END.len()
+            // Case: Delimiters missing, but directive heading or anchor exists
+            let head_opt = if let Some(a_idx) = text.find("@docgov-anchor") {
+                let line_start = text[..a_idx].rfind('\n').map(|i| i + 1).unwrap_or(0);
+                Some((line_start, "@docgov-anchor".len()))
+            } else {
+                text.find(clean_heading)
+                    .map(|h_idx| (h_idx, clean_heading.len()))
+            };
+
+            if let Some((head_idx, match_len)) = head_opt {
+                let after_head = &text[head_idx + match_len..];
+                let end_idx = if let Some((_, end_rel_end)) = find_end_delimiter_span(after_head) {
+                    head_idx + match_len + end_rel_end
                 } else {
                     find_next_major_heading(after_head)
-                        .map(|offset| head_idx + detected_heading.len() + offset)
+                        .map(|offset| head_idx + match_len + offset)
                         .unwrap_or(text.len())
                 };
 
@@ -198,7 +270,7 @@ impl Rule for AgentDirectivesRule {
                         format!("Missing agent directives configuration file '{}'", target),
                         rel_target,
                     )
-                    .with_suggestion("Run `docgov init` to create it with the non-invasive docgov directives block."),
+                    .with_suggestion("Run `docgov fix` (or `docgov init`) to create it with the non-invasive docgov directives block."),
                 );
                 continue;
             }
@@ -215,16 +287,14 @@ impl Rule for AgentDirectivesRule {
                 }
             };
 
-            let begin_opt = find_delimiter_line(&content, DOCGOV_DIRECTIVES_BEGIN)
-                .or_else(|| content.find(DOCGOV_DIRECTIVES_BEGIN));
-            let end_opt = begin_opt.and_then(|b| {
-                find_delimiter_line(&content[b..], DOCGOV_DIRECTIVES_END)
-                    .or_else(|| content[b..].find(DOCGOV_DIRECTIVES_END))
-                    .map(|e| b + e + DOCGOV_DIRECTIVES_END.len())
+            let begin_opt = find_begin_delimiter_span(&content);
+            let end_opt = begin_opt.and_then(|(b_start, _)| {
+                find_end_delimiter_span(&content[b_start..])
+                    .map(|(_, e_rel_end)| b_start + e_rel_end)
             });
 
             match (begin_opt, end_opt) {
-                (Some(begin_idx), Some(end_idx)) => {
+                (Some((begin_idx, _)), Some(end_idx)) => {
                     // Check against lockfile if present
                     if let Some(ref lockfile) = lock {
                         if let Some(ref artifact) = lockfile.artifacts.agent_directives {
@@ -243,14 +313,14 @@ impl Rule for AgentDirectivesRule {
                                             rel_target.clone(),
                                         )
                                         .with_location(line_num, 1)
-                                        .with_suggestion("Run `docgov init` to re-synchronize directives with upstream lockfile."),
+                                        .with_suggestion("Run `docgov fix` (or `docgov update`) to re-synchronize directives with upstream lockfile."),
                                     );
                                 }
                             }
                         }
                     }
                 }
-                (Some(begin_idx), None) => {
+                (Some((begin_idx, _)), None) => {
                     let line_num = content[..begin_idx].lines().count().max(1);
                     diagnostics.push(
                         Diagnostic::error(
@@ -262,13 +332,16 @@ impl Rule for AgentDirectivesRule {
                             rel_target,
                         )
                         .with_location(line_num, 1)
-                        .with_suggestion("Run `docgov update` or `docgov init` to restore the delimiter comments."),
+                        .with_suggestion("Run `docgov fix` to restore the delimiter comments."),
                     );
                 }
                 _ => {
                     let line_num = content.lines().count().max(1);
-                    let looks_corrupted = content.contains(DOCGOV_DIRECTIVES_END)
+                    let looks_corrupted = is_end_tag(&content)
+                        || content.contains(DOCGOV_DIRECTIVES_END)
+                        || content.contains("@docgov-anchor")
                         || content.contains("Documentation Governance Directives")
+                        || content.contains("Hard Constraints (Zero-Tolerance Invariants)")
                         || content.contains("Machine Invariants (Pre-Submit Checklist)");
                     if looks_corrupted {
                         diagnostics.push(
@@ -281,7 +354,7 @@ impl Rule for AgentDirectivesRule {
                                 rel_target,
                             )
                             .with_location(line_num, 1)
-                            .with_suggestion("Run `docgov update` or `docgov init` to restore the boundary comments."),
+                            .with_suggestion("Run `docgov fix` to restore the boundary comments."),
                         );
                     } else {
                         diagnostics.push(
@@ -294,7 +367,7 @@ impl Rule for AgentDirectivesRule {
                                 rel_target,
                             )
                             .with_location(line_num, 1)
-                            .with_suggestion("Run `docgov init` to insert the non-invasive docgov directives block without overwriting existing instructions."),
+                            .with_suggestion("Run `docgov fix` (or `docgov init`) to insert the non-invasive docgov directives block without overwriting existing instructions."),
                         );
                     }
                 }
