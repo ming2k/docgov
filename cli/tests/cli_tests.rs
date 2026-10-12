@@ -1443,3 +1443,83 @@ artifacts: {}
         String::from_utf8_lossy(&output.stdout)
     );
 }
+
+/// `docgov init` defaults to dynamically resolving the latest available upstream spec,
+/// ensuring new repositories automatically adopt the latest standard rather than a stale version.
+#[test]
+fn test_binary_init_defaults_to_latest_spec() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_docgov"))
+        .arg("--path")
+        .arg(root)
+        .arg("init")
+        .output()
+        .expect("failed to run docgov init");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "docgov init failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let docgov_yml = root.join(".docgov.yml");
+    assert!(docgov_yml.exists(), ".docgov.yml must be created");
+    let content = fs::read_to_string(&docgov_yml).unwrap();
+    assert!(
+        content.contains("version: \"0.0.3\""),
+        "init must initialize to latest spec 0.0.3, got:\n{}",
+        content
+    );
+    assert!(
+        content.contains("ref: \"v0.0.3\""),
+        "init must set upstream ref to latest spec v0.0.3, got:\n{}",
+        content
+    );
+
+    let lock = root.join(".docgov.lock");
+    assert!(lock.exists(), ".docgov.lock must be created");
+    let lock_content = fs::read_to_string(&lock).unwrap();
+    assert!(
+        lock_content.contains("protocol_version: 0.0.3"),
+        "lockfile must record protocol 0.0.3, got:\n{}",
+        lock_content
+    );
+}
+
+/// `docgov init --target <REF>` and positional `docgov init <REF>` allow pinning an explicit version.
+#[test]
+fn test_binary_init_with_explicit_target_flag() {
+    let dir = tempdir().unwrap();
+    let root = dir.path();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_docgov"))
+        .arg("--path")
+        .arg(root)
+        .args(["init", "--target", "v0.0.2"])
+        .output()
+        .expect("failed to run docgov init --target v0.0.2");
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "docgov init --target v0.0.2 failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let docgov_yml = root.join(".docgov.yml");
+    assert!(docgov_yml.exists(), ".docgov.yml must be created");
+    let content = fs::read_to_string(&docgov_yml).unwrap();
+    assert!(
+        content.contains("version: \"0.0.2\""),
+        "pinned init must initialize to target 0.0.2, got:\n{}",
+        content
+    );
+    assert!(
+        content.contains("ref: \"v0.0.2\""),
+        "pinned init must set upstream ref to target v0.0.2, got:\n{}",
+        content
+    );
+}

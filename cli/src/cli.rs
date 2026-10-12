@@ -121,6 +121,14 @@ pub enum Commands {
 
     /// Initialize standard .docgov.yml configuration and AGENTS.md in the current repository
     Init {
+        /// Target version or specification release to initialize with (e.g. 'v0.0.3', '0.0.3', or 'latest'). Defaults to latest release.
+        #[arg(value_name = "TARGET_REF")]
+        target: Option<String>,
+
+        /// Explicit target version flag alias (e.g. --target v0.0.3)
+        #[arg(long = "target", value_name = "TARGET_REF", conflicts_with = "target")]
+        target_flag: Option<String>,
+
         /// Overwrite existing configuration or refresh directive blocks
         #[arg(long, short = 'F')]
         force: bool,
@@ -131,6 +139,10 @@ pub enum Commands {
         /// Target version to update to (e.g. 'v0.1.1', '0.1.1', or 'latest'). Defaults to current upstream ref or latest release.
         #[arg(value_name = "TARGET_REF")]
         target: Option<String>,
+
+        /// Explicit target version flag alias (e.g. --target v0.1.1)
+        #[arg(long = "target", value_name = "TARGET_REF", conflicts_with = "target")]
+        target_flag: Option<String>,
 
         /// Check if a specification update is available without modifying files (exit code 1 if update available)
         #[arg(long)]
@@ -213,24 +225,33 @@ fn run_command(cli: &Cli) -> Result<i32> {
         }
         Some(Commands::Diff { base }) => run_diff(&target_dir, cli.format, base),
         Some(Commands::Fix) => run_fix(&target_dir),
-        Some(Commands::Init { force }) => {
-            init_repo(&target_dir, *force)?;
+        Some(Commands::Init {
+            target,
+            target_flag,
+            force,
+        }) => {
+            let effective_target = target.as_deref().or(target_flag.as_deref());
+            init_repo(&target_dir, effective_target, *force)?;
             Ok(0)
         }
         Some(Commands::Update {
             target,
+            target_flag,
             check,
             dry_run,
             force,
             local,
-        }) => update_repo(
-            &target_dir,
-            target.as_deref(),
-            *check,
-            *dry_run,
-            *force,
-            *local,
-        ),
+        }) => {
+            let effective_target = target.as_deref().or(target_flag.as_deref());
+            update_repo(
+                &target_dir,
+                effective_target,
+                *check,
+                *dry_run,
+                *force,
+                *local,
+            )
+        }
     }
 }
 
@@ -583,21 +604,55 @@ pub fn run_fix(dir: &std::path::Path) -> Result<i32> {
     Ok(0)
 }
 
-fn init_repo(dir: &std::path::Path, force: bool) -> Result<()> {
+pub fn init_repo(dir: &std::path::Path, target: Option<&str>, force: bool) -> Result<()> {
     let docgov_yml = dir.join(".docgov.yml");
 
     if !docgov_yml.exists() || force {
         let (cfg, _) = Config::load_from_dir(dir).unwrap_or((Config::default(), None));
-        let remote_client = RemoteClient::new(&cfg.upstream.source, &cfg.upstream.r#ref);
+        let (canonical_source, _) =
+            crate::remote::canonicalize_upstream_source(&cfg.upstream.source);
+
+        // Resolve target reference:
+        // By default, init queries upstream for the latest specification release
+        // so new repositories adopt the latest spec without hardcoded drift.
+        let target_tag = match target {
+            Some("latest") | None => {
+                let probe_client = RemoteClient::new(&canonical_source, "latest");
+                match probe_client.fetch_latest_release(Some(dir)) {
+                    Ok(info) => info.tag_name,
+                    Err(_) => cfg.upstream.r#ref.clone(),
+                }
+            }
+            Some(t) => {
+                if t.starts_with('v') {
+                    t.to_string()
+                } else {
+                    format!("v{}", t)
+                }
+            }
+        };
+
+        let target_ver = target_tag.strip_prefix('v').unwrap_or(&target_tag);
+        let remote_client = RemoteClient::new(&canonical_source, &target_tag);
+
         let yml_content = match remote_client.fetch_config_template(Some(dir)) {
-            Ok((content, _)) => content,
+            Ok((content, _)) => {
+                // Ensure version, ref, and upstream match resolved target
+                patch_yaml_version_ref_and_source(
+                    &content,
+                    target_ver,
+                    &target_tag,
+                    Some(&canonical_source),
+                )
+            }
             Err(_) => {
                 // Minimal standalone fallback only if completely unreachable
-                r#"version: "0.0.2"
+                format!(
+                    r#"version: "{}"
 
 upstream:
-  source: "https://github.com/ming2k/docgov"
-  ref: "v0.0.2"
+  source: "{}"
+  ref: "{}"
 
 governance_docs:
   install: true
@@ -607,8 +662,9 @@ agent_directives:
   enforce: true
   targets:
     - "AGENTS.md"
-"#
-                .to_string()
+"#,
+                    target_ver, canonical_source, target_tag
+                )
             }
         };
 
