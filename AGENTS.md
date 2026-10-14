@@ -9,7 +9,7 @@ Instructions for AI coding assistants working in the `docgov` repository.
 `docgov` (Document Governance) is a portable, protocol-versioned documentation governance standard and verification engine for software engineering repositories.
 
 The repository is structured as a monorepo:
-1. **`spec/`**: Sovereign specification standard (Semantic Tensor Core, vertical domain profiles).
+1. **`spec/`**: Sovereign specification standard (Core governance primitives, vertical domain profiles).
 2. **`cli/`**: High-performance compiler-grade Rust verification engine (`docgov`).
 
 ---
@@ -19,7 +19,7 @@ The repository is structured as a monorepo:
 - **CLI Engine**: All engine source code resides in `cli/src/` with integration test suites in `cli/tests/`.
 - **Specification**: All governance specifications reside in `spec/`.
 - **Independent Versioning**: CLI uses `vx.x.x` tags; Spec uses `spec-vx.x.x` tags.
-- **Verification**: Always run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` before completing tasks.
+- **Verification**: Run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` before completing code changes.
 
 <!-- BEGIN DOCGOV DIRECTIVES -->
 <!-- CRITICAL: MANAGED BY DOCGOV. DO NOT MODIFY, MOVE, OR REMOVE DELIMITER TAGS. -->
@@ -50,10 +50,8 @@ Before drafting or restructuring documentation, inspect the local governance spe
 - ADR & RFC Standards: `docs/governance/documentation/profiles/architecture/adr.md`
 - Quality & Verification: `docs/governance/documentation/profiles/validation/testing.md`
 
-### 4. Verification & Self-Correction Gate
-Run verification before completing any task:
-```bash
-docgov check
-```
-If violations are detected, inspect diagnostic suggestions and resolve them within the current turn.
+### 4. Verification & Advisory Gate (On-Demand / Lazy)
+`docgov` is an on-demand verification tool, not an unconditional mandatory step for every turn. Apply a lazy strategy:
+- **Skip (No-op)**: Pure discussions, architecture Q&A, intermediate edits, or internal code changes that do not touch documentation or governance boundaries.
+- **Run (Targeted Verification)**: Execute `docgov check` before final hand-off only when modifying `docs/`, `spec/`, ADRs (`docs/adr/`), or files affecting code-doc sync (`[INV-LINT-04]`). Prioritize static self-review over blind tool invocation.
 <!-- END DOCGOV DIRECTIVES -->

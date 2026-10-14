@@ -22,11 +22,11 @@ docgov/
 │   │   └── ...
 │   └── tests/                  # Integration test suites
 └── spec/                       # Sovereign specification standard
-    ├── VERSION                 # Protocol specification version (0.0.3)
-    ├── .manifest.json          # Cryptographic SHA-256 asset catalog
+    ├── .manifest.json          # Protocol version metadata and SHA-256 asset catalog
+    ├── default-config.yml      # Canonical adoption configuration template
     ├── directives.snippet      # Canonical AI agent directives block
-    ├── core/                   # Semantic Tensor Core
-    │   ├── taxonomy.md         # 4D spatial coordinate tensor
+    ├── core/                   # Core governance specification
+    │   ├── taxonomy.md         # Multi-dimensional governance coordinates
     │   ├── invariants.md       # Codified system invariants ([INV-*])
     │   ├── style.md            # Technical voice & citation contracts
     │   └── workflow.md         # Unified operational lifecycle

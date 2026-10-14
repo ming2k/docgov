@@ -11,6 +11,15 @@ use tempfile::tempdir;
 
 const SAMPLE_SNIPPET: &str = include_str!("fixtures/directives.snippet");
 
+fn write_mock_spec_manifest(dir: &std::path::Path, version: &str) {
+    let manifest = serde_json::json!({
+        "schema": "docgov/manifest",
+        "schema_version": 2,
+        "protocol_version": version,
+    });
+    fs::write(dir.join(".manifest.json"), manifest.to_string()).unwrap();
+}
+
 #[test]
 fn test_lint_01_root_sanitizer() {
     let dir = tempdir().unwrap();
@@ -806,10 +815,10 @@ fn test_update_check_mode_detects_newer_spec_via_local_upstream() {
     let dir = tempdir().unwrap();
     let root = dir.path();
 
-    // Fake spec repo with VERSION 0.3.0
+    // Fake spec repo with manifest protocol_version 0.3.0
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
-    fs::write(spec_dir.join("VERSION"), "0.3.0\n").unwrap();
+    write_mock_spec_manifest(&spec_dir, "0.3.0");
     fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
     fs::write(spec_dir.join("core/invariants.md"), "# Inv\n").unwrap();
 
@@ -840,7 +849,7 @@ fn test_update_check_mode_reports_up_to_date_with_zero_exit() {
 
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
-    fs::write(spec_dir.join("VERSION"), "0.1.0\n").unwrap();
+    write_mock_spec_manifest(&spec_dir, "0.1.0");
     fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
 
     let ws = root.join("workspace");
@@ -863,7 +872,7 @@ fn test_update_dry_run_makes_no_changes() {
 
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
-    fs::write(spec_dir.join("VERSION"), "0.4.0\n").unwrap();
+    write_mock_spec_manifest(&spec_dir, "0.4.0");
     fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
     fs::write(spec_dir.join("core/invariants.md"), "# Inv\n").unwrap();
 
@@ -893,7 +902,7 @@ fn test_update_end_to_end_applies_upgrade_and_refreshes_lock() {
 
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
-    fs::write(spec_dir.join("VERSION"), "0.5.0\n").unwrap();
+    write_mock_spec_manifest(&spec_dir, "0.5.0");
     fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
     fs::write(spec_dir.join("core/invariants.md"), "# New Invariants\n").unwrap();
 
@@ -939,7 +948,7 @@ fn test_update_explicit_target_version_argument() {
 
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
-    fs::write(spec_dir.join("VERSION"), "0.9.0\n").unwrap();
+    write_mock_spec_manifest(&spec_dir, "0.9.0");
     fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
 
     let ws = root.join("workspace");
@@ -966,7 +975,7 @@ fn test_update_refuses_unsupported_spec_major() {
 
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
-    fs::write(spec_dir.join("VERSION"), "1.0.0\n").unwrap();
+    write_mock_spec_manifest(&spec_dir, "1.0.0");
     fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
 
     let ws = root.join("workspace");
@@ -997,7 +1006,7 @@ fn test_update_does_not_downgrade_without_force() {
 
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
-    fs::write(spec_dir.join("VERSION"), "0.5.0\n").unwrap();
+    write_mock_spec_manifest(&spec_dir, "0.5.0");
     fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
 
     let ws = root.join("workspace");
@@ -1344,7 +1353,7 @@ fn test_docgov_fix_command_repairs_directives() {
     // Create a local spec fixture
     let spec_dir = root.join("spec");
     fs::create_dir_all(&spec_dir).unwrap();
-    fs::write(spec_dir.join("VERSION"), "0.0.3\n").unwrap();
+    write_mock_spec_manifest(&spec_dir, "0.0.3");
     fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
 
     let config = r#"version: "0.0.3"
@@ -1400,7 +1409,7 @@ fn test_docgov_yml_sole_declarative_source_of_truth() {
     // Create local spec fixture with version 0.0.3
     let spec_dir = root.join("spec");
     fs::create_dir_all(&spec_dir).unwrap();
-    fs::write(spec_dir.join("VERSION"), "0.0.3\n").unwrap();
+    write_mock_spec_manifest(&spec_dir, "0.0.3");
     fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
 
     // .docgov.yml declares v0.0.3

@@ -37,9 +37,9 @@ jobs:
 
       - name: Verify Spec Structure
         run: |
-          test -f spec/VERSION
           test -f spec/.manifest.json
           test -f spec/directives.snippet
           test -d spec/core
           test -d spec/profiles
+          grep -q '"protocol_version":' spec/.manifest.json
           echo "Specification assets successfully verified."

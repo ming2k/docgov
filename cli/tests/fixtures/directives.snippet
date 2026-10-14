@@ -27,10 +27,8 @@ Before drafting or restructuring documentation, inspect the local governance spe
 - ADR & RFC Standards: `docs/governance/documentation/profiles/architecture/adr.md`
 - Quality & Verification: `docs/governance/documentation/profiles/validation/testing.md`
 
-### 4. Verification & Self-Correction Gate
-Run verification before completing any task:
-```bash
-docgov check
-```
-If violations are detected, inspect diagnostic suggestions and resolve them within the current turn.
+### 4. Verification & Advisory Gate (On-Demand / Lazy)
+`docgov` is an on-demand verification tool, not an unconditional mandatory step for every turn. Apply a lazy strategy:
+- **Skip (No-op)**: Pure discussions, architecture Q&A, intermediate edits, or internal code changes that do not touch documentation or governance boundaries.
+- **Run (Targeted Verification)**: Execute `docgov check` before final hand-off only when modifying `docs/`, `spec/`, ADRs (`docs/adr/`), or files affecting code-doc sync (`[INV-LINT-04]`). Prioritize static self-review over blind tool invocation.
 <!-- END DOCGOV DIRECTIVES -->

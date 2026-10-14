@@ -99,26 +99,36 @@ impl RemoteClient {
     /// Resolve the latest available specification release from upstream.
     ///
     /// Resilience strategy:
-    /// 1. If local spec is available (e.g. sibling `../docgov-spec` or local path), reads `VERSION` file.
+    /// 1. If local spec is available (e.g. sibling `../docgov-spec` or local path), reads `.manifest.json`.
     /// 2. Probes GitHub web redirect `https://github.com/{owner}/{repo}/releases/latest` (resilient, no API rate-limits).
     /// 3. Falls back to GitHub REST API `/repos/{owner}/{repo}/releases/latest`.
     pub fn fetch_latest_release(&self, workspace_root: Option<&Path>) -> Result<LatestReleaseInfo> {
         // 1. Check local spec first if available
         if let Some(ws) = workspace_root {
             if let Some(spec_dir) = self.local_spec_dir(ws) {
-                let version_file = spec_dir.join("VERSION");
-                if version_file.is_file() {
-                    let ver = fs::read_to_string(&version_file)?.trim().to_string();
-                    let tag = if ver.starts_with('v') {
-                        ver
-                    } else {
-                        format!("v{}", ver)
-                    };
-                    return Ok(LatestReleaseInfo {
-                        tag_name: tag,
-                        published_at: None,
-                        html_url: Some(format!("file://{}", spec_dir.display())),
-                    });
+                let manifest_file = spec_dir.join(".manifest.json");
+                if manifest_file.is_file() {
+                    let content = fs::read_to_string(&manifest_file)?;
+                    let v: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
+                        anyhow::anyhow!(
+                            "Failed to parse specification manifest {}: {}",
+                            manifest_file.display(),
+                            e
+                        )
+                    })?;
+                    if let Some(ver) = v.get("protocol_version").and_then(|v| v.as_str()) {
+                        let ver = ver.trim();
+                        let tag = if ver.starts_with('v') {
+                            ver.to_string()
+                        } else {
+                            format!("v{}", ver)
+                        };
+                        return Ok(LatestReleaseInfo {
+                            tag_name: tag,
+                            published_at: None,
+                            html_url: Some(format!("file://{}", spec_dir.display())),
+                        });
+                    }
                 }
             }
         }
@@ -315,9 +325,10 @@ impl RemoteClient {
             return Some(ws_relative);
         }
 
-        // Monorepo root check: workspace itself contains spec/ with VERSION & directives.snippet
+        // Monorepo root check: workspace itself contains spec/ with .manifest.json & directives.snippet
         let ws_spec = workspace_root.join("spec");
-        if ws_spec.join("directives.snippet").is_file() && ws_spec.join("VERSION").is_file() {
+        if ws_spec.join("directives.snippet").is_file() && ws_spec.join(".manifest.json").is_file()
+        {
             return Some(ws_spec);
         }
 
