@@ -99,7 +99,7 @@ directly from any CI provider using the `--format` flag your platform understand
 ## 4. CLI Commands
 
 ```bash
-# Print the engine version (bare semantic version, e.g. 0.0.5)
+# Print the engine version (e.g. docgov 0.0.6)
 docgov --version
 
 # Initialize standard .docgov.yml configuration and AGENTS.md in the workspace

@@ -25,9 +25,8 @@ pub const SUPPORTED_SPEC_MAJOR: u64 = 0;
 
 /// The compiled engine version, single-sourced from `Cargo.toml`.
 ///
-/// This is exposed as a machine-readable, bare semantic version string (e.g. `0.0.5`)
-/// so release tooling and scripts can parse stdout directly without stripping a
-/// program-name prefix.
+/// This is exposed as `docgov <version>` (e.g. `docgov 0.0.6`) via `--version`
+/// conforming to POSIX / GNU coding standard conventions for tooling and CI.
 pub const CLI_VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Parser, Debug)]
@@ -121,11 +120,11 @@ pub enum Commands {
 
     /// Initialize standard .docgov.yml configuration and AGENTS.md in the current repository
     Init {
-        /// Target version or specification release to initialize with (e.g. 'v0.0.3', '0.0.3', or 'latest'). Defaults to latest release.
+        /// Target version or specification release to initialize with (e.g. 'v0.0.4', '0.0.4', or 'latest'). Defaults to latest release.
         #[arg(value_name = "TARGET_REF")]
         target: Option<String>,
 
-        /// Explicit target version flag alias (e.g. --target v0.0.3)
+        /// Explicit target version flag alias (e.g. --target v0.0.4)
         #[arg(long = "target", value_name = "TARGET_REF", conflicts_with = "target")]
         target_flag: Option<String>,
 
@@ -183,11 +182,9 @@ pub fn run() -> i32 {
 }
 
 fn run_command(cli: &Cli) -> Result<i32> {
-    // Bare engine version, printed before any workspace/spec resolution so that
-    // `docgov --version` is a pure, offline, side-effect-free query. The bytes on
-    // stdout are exactly the version string (no program-name prefix, no color).
+    // Standard engine version with program-name prefix (e.g. `docgov 0.0.6`)
     if cli.version {
-        println!("{}", CLI_VERSION);
+        println!("docgov {}", CLI_VERSION);
         return Ok(0);
     }
 

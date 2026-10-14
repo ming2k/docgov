@@ -1101,9 +1101,7 @@ fn test_lint_04_require_update_any_of_semantics() {
 }
 
 #[test]
-fn test_version_flag_prints_bare_semver() {
-    // The version flag must emit exactly the engine version with no program-name
-    // prefix and no trailing content, so release tooling can parse stdout directly.
+fn test_version_flag_prints_program_and_version() {
     let exe = env!("CARGO_BIN_EXE_docgov");
 
     for flag in ["--version", "-V"] {
@@ -1116,13 +1114,13 @@ fn test_version_flag_prints_bare_semver() {
         let stdout = String::from_utf8(output.stdout).unwrap();
         assert_eq!(
             stdout,
-            format!("{}\n", docgov::cli::CLI_VERSION),
+            format!("docgov {}\n", docgov::cli::CLI_VERSION),
             "unexpected stdout for {}",
             flag
         );
         assert!(
-            !stdout.starts_with("docgov "),
-            "version output must not carry a program-name prefix"
+            stdout.starts_with("docgov "),
+            "version output must carry program-name prefix"
         );
     }
 }
