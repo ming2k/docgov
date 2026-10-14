@@ -1476,13 +1476,13 @@ fn test_binary_init_defaults_to_latest_spec() {
     assert!(docgov_yml.exists(), ".docgov.yml must be created");
     let content = fs::read_to_string(&docgov_yml).unwrap();
     assert!(
-        content.contains("version: \"0.0.3\""),
-        "init must initialize to latest spec 0.0.3, got:\n{}",
+        content.contains("version: \"0.0.4\""),
+        "init must initialize to latest spec 0.0.4, got:\n{}",
         content
     );
     assert!(
-        content.contains("ref: \"v0.0.3\""),
-        "init must set upstream ref to latest spec v0.0.3, got:\n{}",
+        content.contains("ref: \"v0.0.4\""),
+        "init must set upstream ref to latest spec v0.0.4, got:\n{}",
         content
     );
 
@@ -1490,8 +1490,8 @@ fn test_binary_init_defaults_to_latest_spec() {
     assert!(lock.exists(), ".docgov.lock must be created");
     let lock_content = fs::read_to_string(&lock).unwrap();
     assert!(
-        lock_content.contains("protocol_version: 0.0.3"),
-        "lockfile must record protocol 0.0.3, got:\n{}",
+        lock_content.contains("protocol_version: 0.0.4"),
+        "lockfile must record protocol 0.0.4, got:\n{}",
         lock_content
     );
 }
