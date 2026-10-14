@@ -59,21 +59,20 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          # Package dog binary
-          cp "target/${{ matrix.target }}/release/dog" dist/
-          # Package docgov binary alias
+          # Package canonical docgov binary
           cp "target/${{ matrix.target }}/release/docgov" dist/
+          # Optional alias binary for backwards compatibility
+          cp dist/docgov dist/dog
           cd dist
-          tar -czf "../dog-${{ matrix.target }}.tar.gz" dog docgov
-          # Backwards compatibility bundle name
-          tar -czf "../docgov-${{ matrix.target }}.tar.gz" dog docgov
+          tar -czf "../docgov-${{ matrix.target }}.tar.gz" docgov dog
+          tar -czf "../dog-${{ matrix.target }}.tar.gz" docgov dog
           cd ..
           if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "dog-${{ matrix.target }}.tar.gz" > "dog-${{ matrix.target }}.tar.gz.sha256"
             sha256sum "docgov-${{ matrix.target }}.tar.gz" > "docgov-${{ matrix.target }}.tar.gz.sha256"
+            sha256sum "dog-${{ matrix.target }}.tar.gz" > "dog-${{ matrix.target }}.tar.gz.sha256"
           else
-            shasum -a 256 "dog-${{ matrix.target }}.tar.gz" > "dog-${{ matrix.target }}.tar.gz.sha256"
             shasum -a 256 "docgov-${{ matrix.target }}.tar.gz" > "docgov-${{ matrix.target }}.tar.gz.sha256"
+            shasum -a 256 "dog-${{ matrix.target }}.tar.gz" > "dog-${{ matrix.target }}.tar.gz.sha256"
           fi
 
       - name: Package archive (Windows)
@@ -81,14 +80,14 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist
-          Copy-Item "target/${{ matrix.target }}/release/dog.exe" -Destination dist/
           Copy-Item "target/${{ matrix.target }}/release/docgov.exe" -Destination dist/
-          Compress-Archive -Path "dist/*" -DestinationPath "dog-${{ matrix.target }}.zip" -Force
-          Copy-Item "dog-${{ matrix.target }}.zip" -Destination "docgov-${{ matrix.target }}.zip"
-          $hashDog = (Get-FileHash -Algorithm SHA256 "dog-${{ matrix.target }}.zip").Hash.ToLower()
-          "$hashDog  dog-${{ matrix.target }}.zip" | Out-File -Encoding ascii "dog-${{ matrix.target }}.zip.sha256"
+          Copy-Item "target/${{ matrix.target }}/release/docgov.exe" -Destination dist/dog.exe
+          Compress-Archive -Path "dist/*" -DestinationPath "docgov-${{ matrix.target }}.zip" -Force
+          Copy-Item "docgov-${{ matrix.target }}.zip" -Destination "dog-${{ matrix.target }}.zip"
           $hashDocgov = (Get-FileHash -Algorithm SHA256 "docgov-${{ matrix.target }}.zip").Hash.ToLower()
           "$hashDocgov  docgov-${{ matrix.target }}.zip" | Out-File -Encoding ascii "docgov-${{ matrix.target }}.zip.sha256"
+          $hashDog = (Get-FileHash -Algorithm SHA256 "dog-${{ matrix.target }}.zip").Hash.ToLower()
+          "$hashDog  dog-${{ matrix.target }}.zip" | Out-File -Encoding ascii "dog-${{ matrix.target }}.zip.sha256"
 
       - name: Upload binary artifacts
         uses: actions/upload-artifact@v4

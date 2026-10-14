@@ -79,7 +79,8 @@ impl LintEngine {
     }
 
     pub fn run_lint(&self, changed_files: Option<&[PathBuf]>) -> Result<Vec<Diagnostic>> {
-        self.run_lint_with_stats(changed_files).map(|o| o.diagnostics)
+        self.run_lint_with_stats(changed_files)
+            .map(|o| o.diagnostics)
     }
 
     fn collect_root_files(&self) -> Result<Vec<PathBuf>> {

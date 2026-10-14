@@ -304,10 +304,7 @@ impl Config {
     /// Load configuration from a specified path, or search the root directory
     pub fn load_from_dir<P: AsRef<Path>>(dir: P) -> Result<(Self, Option<PathBuf>)> {
         let dir = dir.as_ref();
-        let candidates = [
-            dir.join(".docgov.yml"),
-            dir.join(".docgov.yaml"),
-        ];
+        let candidates = [dir.join(".docgov.yml"), dir.join(".docgov.yaml")];
 
         for candidate in &candidates {
             if candidate.exists() && candidate.is_file() {

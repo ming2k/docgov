@@ -652,18 +652,19 @@ pub fn init_repo(dir: &std::path::Path, target: Option<&str>, force: bool) -> Re
             }
         };
 
-        let target_ver = target_tag.strip_prefix('v').unwrap_or(&target_tag).to_string();
+        let target_ver = target_tag
+            .strip_prefix('v')
+            .unwrap_or(&target_tag)
+            .to_string();
         let remote_client = RemoteClient::new(&canonical_source, &target_tag);
 
         let yml_content = match remote_client.fetch_config_template(Some(dir)) {
-            Ok((content, _)) => {
-                patch_yaml_version_ref_and_source(
-                    &content,
-                    &target_ver,
-                    &target_tag,
-                    Some(&canonical_source),
-                )
-            }
+            Ok((content, _)) => patch_yaml_version_ref_and_source(
+                &content,
+                &target_ver,
+                &target_tag,
+                Some(&canonical_source),
+            ),
             Err(_) => {
                 format!(
                     r#"version: "{}"
@@ -711,10 +712,16 @@ agent_directives:
     }
 
     if let Some(ref docs_path) = report.docs_target {
-        items.push(format!("Synchronized governance documentation to {}", docs_path));
+        items.push(format!(
+            "Synchronized governance documentation to {}",
+            docs_path
+        ));
     }
 
-    let rel_lock = report.lock_path.strip_prefix(dir).unwrap_or(&report.lock_path);
+    let rel_lock = report
+        .lock_path
+        .strip_prefix(dir)
+        .unwrap_or(&report.lock_path);
     items.push(format!("Wrote integrity lockfile {}", rel_lock.display()));
 
     println!(
@@ -1049,7 +1056,9 @@ pub fn update_repo(
         };
         let patched = patch_yaml_version_ref_and_source(orig, &target_ver, &target_tag, new_source);
         std::fs::write(&docgov_yml_path, patched)?;
-        let rel_yml = docgov_yml_path.strip_prefix(dir).unwrap_or(&docgov_yml_path);
+        let rel_yml = docgov_yml_path
+            .strip_prefix(dir)
+            .unwrap_or(&docgov_yml_path);
         items.push(format!(
             "Updated specification declaration in {}",
             rel_yml.display()
@@ -1081,11 +1090,11 @@ pub fn update_repo(
         items.push(format!("Synchronized governance documentation in {}", d));
     }
 
-    let rel_lock = report.lock_path.strip_prefix(dir).unwrap_or(&report.lock_path);
-    items.push(format!(
-        "Renewed integrity lockfile {}",
-        rel_lock.display()
-    ));
+    let rel_lock = report
+        .lock_path
+        .strip_prefix(dir)
+        .unwrap_or(&report.lock_path);
+    items.push(format!("Renewed integrity lockfile {}", rel_lock.display()));
 
     println!();
     println!(

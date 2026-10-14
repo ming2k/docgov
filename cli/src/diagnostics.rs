@@ -130,11 +130,7 @@ impl Diagnostic {
         }
 
         if let Some(suggestion) = &self.suggestion {
-            out.push_str(&format!(
-                "   = {}: {}\n",
-                output::green("help"),
-                suggestion
-            ));
+            out.push_str(&format!("   = {}: {}\n", output::green("help"), suggestion));
         }
 
         out
