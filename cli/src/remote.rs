@@ -444,16 +444,6 @@ impl RemoteClient {
                         candidate_file.display()
                     )
                 })?;
-                println!(
-                    "{}",
-                    crate::output::status(
-                        crate::output::Sym::Info,
-                        format!(
-                            "Using local specification directives ({})",
-                            candidate_file.display()
-                        )
-                    )
-                );
                 return Ok((content, format!("local:{}", candidate_file.display())));
             }
         }
@@ -465,13 +455,6 @@ impl RemoteClient {
         if cache_file.exists() {
             if let Ok(content) = fs::read_to_string(&cache_file) {
                 if !content.trim().is_empty() {
-                    println!(
-                        "{}",
-                        crate::output::status(
-                            crate::output::Sym::Success,
-                            format!("Cached remote assets hit ({})", cache_file.display())
-                        )
-                    );
                     return Ok((content, "cache".to_string()));
                 }
             }
@@ -485,13 +468,6 @@ impl RemoteClient {
                     // Save to local cache for future runs
                     let _ = fs::create_dir_all(&cache_dir);
                     let _ = fs::write(&cache_file, &content);
-                    println!(
-                        "{}",
-                        crate::output::status(
-                            crate::output::Sym::Success,
-                            format!("Fetched remote directives from {}", url)
-                        )
-                    );
                     return Ok((content, url.clone()));
                 }
                 _ => continue,
@@ -546,16 +522,6 @@ impl RemoteClient {
         let cache_tar = cache_dir.join("docgov-assets.tar.gz");
 
         let tar_bytes: Vec<u8> = if !force && cache_tar.exists() {
-            println!(
-                "{}",
-                crate::output::status(
-                    crate::output::Sym::Success,
-                    format!(
-                        "Using cached governance documentation archive ({})",
-                        cache_tar.display()
-                    )
-                )
-            );
             fs::read(&cache_tar)?
         } else {
             let (owner, repo) = self.parse_owner_repo();
@@ -571,19 +537,11 @@ impl RemoteClient {
                     owner, repo, clean_ver, clean_ver
                 ),
                 format!(
-                    "https://github.com/{}/{}/releases/download/spec-v{}/dog-spec-{}.tar.gz",
-                    owner, repo, clean_ver, clean_ver
-                ),
-                format!(
                     "https://github.com/{}/{}/releases/download/spec-v{}/docgov-assets.tar.gz",
                     owner, repo, clean_ver
                 ),
                 format!(
                     "https://github.com/{}/{}/releases/download/{}/docgov-spec-{}.tar.gz",
-                    owner, repo, self.r#ref, clean_ver
-                ),
-                format!(
-                    "https://github.com/{}/{}/releases/download/{}/dog-spec-{}.tar.gz",
                     owner, repo, self.r#ref, clean_ver
                 ),
                 format!(
@@ -600,13 +558,6 @@ impl RemoteClient {
                     Ok(bytes) => {
                         let _ = fs::create_dir_all(&cache_dir);
                         let _ = fs::write(&cache_tar, &bytes);
-                        println!(
-                            "{}",
-                            crate::output::status(
-                                crate::output::Sym::Success,
-                                format!("Downloaded governance documentation assets from {}", url)
-                            )
-                        );
                         downloaded = Some(bytes);
                         break;
                     }
@@ -706,17 +657,6 @@ impl RemoteClient {
             let _ = fs::remove_dir_all(&staging_dir);
         }
 
-        println!(
-            "{}",
-            crate::output::status(
-                crate::output::Sym::Success,
-                format!(
-                    "Atomically synchronized and pruned canonical governance documentation into {}",
-                    target_dir.display()
-                )
-            )
-        );
-
         Ok(archive_hash)
     }
 
@@ -750,16 +690,6 @@ impl RemoteClient {
         }
 
         let hash = compute_dir_sha256(target_dir)?;
-        println!(
-            "{}",
-            crate::output::status(
-                crate::output::Sym::Success,
-                format!(
-                    "Atomically synchronized local governance specification into {}",
-                    target_dir.display()
-                )
-            )
-        );
 
         Ok(hash)
     }

@@ -33,7 +33,7 @@ pub struct Config {
 }
 
 fn default_version() -> String {
-    "0.0.3".to_string()
+    "0.0.4".to_string()
 }
 
 impl Default for Config {
@@ -231,7 +231,7 @@ fn default_upstream_source() -> String {
 }
 
 fn default_upstream_ref() -> String {
-    "v0.0.3".to_string()
+    "v0.0.4".to_string()
 }
 
 impl Default for UpstreamConfig {
@@ -305,12 +305,8 @@ impl Config {
     pub fn load_from_dir<P: AsRef<Path>>(dir: P) -> Result<(Self, Option<PathBuf>)> {
         let dir = dir.as_ref();
         let candidates = [
-            dir.join(".dog.yml"),
-            dir.join(".dog.yaml"),
             dir.join(".docgov.yml"),
             dir.join(".docgov.yaml"),
-            dir.join(".governance.yml"),
-            dir.join(".governance.yaml"),
         ];
 
         for candidate in &candidates {

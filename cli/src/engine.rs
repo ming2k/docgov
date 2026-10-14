@@ -8,6 +8,13 @@ use crate::config::Config;
 use crate::diagnostics::Diagnostic;
 use crate::rules::{all_rules, LintContext};
 
+#[derive(Debug, Clone)]
+pub struct LintOutcome {
+    pub diagnostics: Vec<Diagnostic>,
+    pub file_count: usize,
+    pub rule_count: usize,
+}
+
 pub struct LintEngine {
     pub workspace_root: PathBuf,
     pub config: Config,
@@ -30,12 +37,13 @@ impl LintEngine {
         self
     }
 
-    pub fn run_lint(&self, changed_files: Option<&[PathBuf]>) -> Result<Vec<Diagnostic>> {
+    pub fn run_lint_with_stats(&self, changed_files: Option<&[PathBuf]>) -> Result<LintOutcome> {
         // 1. Collect root directory entries
         let root_files = self.collect_root_files()?;
 
         // 2. Discover and parse all markdown documents
         let markdown_docs = self.discover_markdown_docs()?;
+        let file_count = markdown_docs.len();
 
         // 3. Build LintContext
         let ctx = LintContext {
@@ -47,8 +55,10 @@ impl LintEngine {
         };
 
         // 4. Run rules
+        let rules = all_rules();
+        let rule_count = rules.len();
         let mut diagnostics = Vec::new();
-        for rule in all_rules() {
+        for rule in rules {
             let res = rule.check(&ctx)?;
             diagnostics.extend(res);
         }
@@ -61,7 +71,15 @@ impl LintEngine {
                 .then(a.column.cmp(&b.column))
         });
 
-        Ok(diagnostics)
+        Ok(LintOutcome {
+            diagnostics,
+            file_count,
+            rule_count,
+        })
+    }
+
+    pub fn run_lint(&self, changed_files: Option<&[PathBuf]>) -> Result<Vec<Diagnostic>> {
+        self.run_lint_with_stats(changed_files).map(|o| o.diagnostics)
     }
 
     fn collect_root_files(&self) -> Result<Vec<PathBuf>> {

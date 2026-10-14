@@ -210,6 +210,39 @@ pub fn plural(count: usize, singular: &str, plural: &str) -> String {
     format!("{} {}", count, if count == 1 { singular } else { plural })
 }
 
+/// Bullet character for lists (`•` in Unicode, `*` in ASCII mode).
+pub fn bullet() -> &'static str {
+    if ascii_mode() {
+        "*"
+    } else {
+        "•"
+    }
+}
+
+/// Tree branch prefix (`├─ ` / `+- ` or `└─ ` / `\- `).
+pub fn tree_branch(is_last: bool) -> &'static str {
+    if ascii_mode() {
+        if is_last {
+            "\\- "
+        } else {
+            "+- "
+        }
+    } else if is_last {
+        "└─ "
+    } else {
+        "├─ "
+    }
+}
+
+/// Vertical pipe character (`│` in Unicode, `|` in ASCII mode).
+pub fn pipe() -> &'static str {
+    if ascii_mode() {
+        "|"
+    } else {
+        "│"
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -258,6 +291,10 @@ mod tests {
         ] {
             assert!(sym.glyph().is_ascii(), "non-ASCII glyph for {sym:?}");
         }
+        assert!(bullet().is_ascii());
+        assert!(tree_branch(false).is_ascii());
+        assert!(tree_branch(true).is_ascii());
+        assert!(pipe().is_ascii());
     }
 
     #[test]

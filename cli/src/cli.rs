@@ -277,7 +277,10 @@ fn run_check(
         None
     };
 
-    let raw_diagnostics = engine.run_lint(changed.as_deref())?;
+    let outcome = engine.run_lint_with_stats(changed.as_deref())?;
+    let raw_diagnostics = outcome.diagnostics;
+    let file_count = outcome.file_count;
+    let rule_count = outcome.rule_count;
 
     if let Some(baseline_out) = generate_baseline {
         let base_obj =
@@ -332,6 +335,8 @@ fn run_check(
         duration,
         suppressed_count,
         &engine.config.version,
+        file_count,
+        rule_count,
     );
 
     let error_count = diagnostics
@@ -366,7 +371,15 @@ fn run_diff(target_dir: &std::path::Path, format: OutputFormat, base: &str) -> R
     let diagnostics = rule.check(&ctx)?;
     let duration = start.elapsed();
 
-    output_diagnostics(&diagnostics, format, duration, 0, &engine.config.version);
+    output_diagnostics(
+        &diagnostics,
+        format,
+        duration,
+        0,
+        &engine.config.version,
+        changed.len(),
+        1,
+    );
 
     let error_count = diagnostics
         .iter()
@@ -386,18 +399,25 @@ fn output_diagnostics(
     duration: std::time::Duration,
     suppressed_count: usize,
     protocol_version: &str,
+    file_count: usize,
+    rule_count: usize,
 ) {
     match format {
         OutputFormat::Text => {
             let summary = ReportSummary::tally(diagnostics, suppressed_count);
 
             if diagnostics.is_empty() {
+                let file_str = output::plural(file_count, "markdown file", "markdown files");
+                let rule_str =
+                    output::plural(rule_count, "governance invariant", "governance invariants");
                 let mut line = output::status(
                     Sym::Success,
                     format!(
-                        "All Protocol v{} documentation invariants verified in {:.3}s.",
-                        protocol_version,
-                        duration.as_secs_f64()
+                        "Verified {} across {} in {:.3}s (Protocol v{}).",
+                        file_str,
+                        rule_str,
+                        duration.as_secs_f64(),
+                        protocol_version
                     ),
                 );
                 if suppressed_count > 0 {
@@ -423,9 +443,11 @@ fn output_diagnostics(
             let mut verdict = output::status(
                 Sym::Error,
                 format!(
-                    "Found {} in {:.3}s. (Check failed)",
+                    "Found {} across {} in {:.3}s (Protocol v{}). (Check failed)",
                     counts,
-                    duration.as_secs_f64()
+                    output::plural(file_count, "file", "files"),
+                    duration.as_secs_f64(),
+                    protocol_version
                 ),
             );
             if suppressed_count > 0 {
@@ -435,6 +457,15 @@ fn output_diagnostics(
                 ));
             }
             println!("{}\n", verdict);
+
+            // Contextual actionable hints
+            if diagnostics.iter().any(|d| d.rule_id == "INV-LINT-05") {
+                println!(
+                    "  {} run '{}' to automatically repair damaged directive delimiters\n",
+                    output::cyan("hint:"),
+                    output::bold("docgov check --fix")
+                );
+            }
         }
         OutputFormat::Github => {
             for diag in diagnostics {
@@ -487,6 +518,14 @@ fn emit_fatal_error(format: OutputFormat, err: &anyhow::Error) {
         );
     }
     eprintln!("{} {:#}", output::red("Error:"), err);
+    let err_str = format!("{:#}", err);
+    if err_str.contains(".docgov.yml") {
+        eprintln!(
+            "  {} run '{}' to configure documentation governance for this workspace\n",
+            output::cyan("hint:"),
+            output::bold("docgov init")
+        );
+    }
 }
 
 pub fn run_fix(dir: &std::path::Path) -> Result<i32> {
@@ -505,6 +544,7 @@ pub fn run_fix(dir: &std::path::Path) -> Result<i32> {
     });
 
     let mut fixed_count = 0;
+    let mut items = Vec::new();
     for target in &targets {
         let target_path = dir.join(target);
         let existing = if target_path.exists() {
@@ -527,55 +567,20 @@ pub fn run_fix(dir: &std::path::Path) -> Result<i32> {
         match action {
             PatchAction::Created => {
                 std::fs::write(&target_path, &new_content)?;
-                println!(
-                    "{}",
-                    output::status(
-                        Sym::Create,
-                        format!(
-                            "Created {} with docgov directives block",
-                            target_path.display()
-                        )
-                    )
-                );
+                items.push(format!("Created {} with directives block", target));
                 fixed_count += 1;
             }
             PatchAction::Appended => {
                 std::fs::write(&target_path, &new_content)?;
-                println!(
-                    "{}",
-                    output::status(
-                        Sym::Create,
-                        format!(
-                            "Inserted docgov directives block into {}",
-                            target_path.display()
-                        )
-                    )
-                );
+                items.push(format!("Injected directives block into {}", target));
                 fixed_count += 1;
             }
             PatchAction::Updated => {
                 std::fs::write(&target_path, &new_content)?;
-                println!(
-                    "{}",
-                    output::status(
-                        Sym::Update,
-                        format!(
-                            "Repaired docgov directives block in {}",
-                            target_path.display()
-                        )
-                    )
-                );
+                items.push(format!("Repaired directives block in {}", target));
                 fixed_count += 1;
             }
-            PatchAction::Unchanged => {
-                println!(
-                    "{}",
-                    output::status(
-                        Sym::Success,
-                        format!("Directives intact in {}", target_path.display())
-                    )
-                );
-            }
+            PatchAction::Unchanged => {}
         }
     }
 
@@ -585,36 +590,54 @@ pub fn run_fix(dir: &std::path::Path) -> Result<i32> {
     lock.save_to_dir(dir)?;
 
     if fixed_count > 0 {
+        let lock_path = DocgovLock::lockfile_path(dir);
+        let rel_lock = lock_path.strip_prefix(dir).unwrap_or(&lock_path);
+        items.push(format!(
+            "Refreshed integrity lockfile {}",
+            rel_lock.display()
+        ));
         println!(
             "{}",
             output::status(
                 Sym::Success,
                 format!(
-                    "Successfully repaired {} in target workspace.",
-                    output::plural(fixed_count, "file", "files")
+                    "Repaired documentation governance directives (Protocol v{}):",
+                    cfg.version
                 )
             )
         );
+        for (i, item) in items.iter().enumerate() {
+            let is_last = i == items.len() - 1;
+            println!("  {}{}", output::tree_branch(is_last), item);
+        }
     } else {
         println!(
             "{}",
-            output::status(Sym::Success, "All directives blocks are already compliant.")
+            output::status(
+                Sym::Success,
+                "All agent directives blocks in workspace are already compliant."
+            )
         );
     }
     Ok(0)
 }
 
+#[derive(Debug, Clone)]
+pub struct SyncReport {
+    pub directives: Vec<(String, PatchAction)>,
+    pub docs_target: Option<String>,
+    pub lock_path: PathBuf,
+}
+
 pub fn init_repo(dir: &std::path::Path, target: Option<&str>, force: bool) -> Result<()> {
     let docgov_yml = dir.join(".docgov.yml");
+    let mut items = Vec::new();
 
-    if !docgov_yml.exists() || force {
+    let target_ver = if !docgov_yml.exists() || force {
         let (cfg, _) = Config::load_from_dir(dir).unwrap_or((Config::default(), None));
         let (canonical_source, _) =
             crate::remote::canonicalize_upstream_source(&cfg.upstream.source);
 
-        // Resolve target reference:
-        // By default, init queries upstream for the latest specification release
-        // so new repositories adopt the latest spec without hardcoded drift.
         let target_tag = match target {
             Some("latest") | None => {
                 let probe_client = RemoteClient::new(&canonical_source, "latest");
@@ -632,21 +655,19 @@ pub fn init_repo(dir: &std::path::Path, target: Option<&str>, force: bool) -> Re
             }
         };
 
-        let target_ver = target_tag.strip_prefix('v').unwrap_or(&target_tag);
+        let target_ver = target_tag.strip_prefix('v').unwrap_or(&target_tag).to_string();
         let remote_client = RemoteClient::new(&canonical_source, &target_tag);
 
         let yml_content = match remote_client.fetch_config_template(Some(dir)) {
             Ok((content, _)) => {
-                // Ensure version, ref, and upstream match resolved target
                 patch_yaml_version_ref_and_source(
                     &content,
-                    target_ver,
+                    &target_ver,
                     &target_tag,
                     Some(&canonical_source),
                 )
             }
             Err(_) => {
-                // Minimal standalone fallback only if completely unreachable
                 format!(
                     r#"version: "{}"
 
@@ -669,21 +690,68 @@ agent_directives:
         };
 
         std::fs::write(&docgov_yml, yml_content)?;
-        println!(
-            "{}",
-            output::status(Sym::Create, format!("Created {}", docgov_yml.display()))
-        );
+        items.push(format!(
+            "Generated .docgov.yml (upstream: {}@{})",
+            canonical_source, target_tag
+        ));
+        target_ver
     } else {
-        println!(
-            "{}",
-            output::status(Sym::Update, format!("Exists: {}", docgov_yml.display()))
-        );
+        let (cfg, _) = Config::load_from_dir(dir).unwrap_or((Config::default(), None));
+        items.push("Existing .docgov.yml retained".to_string());
+        cfg.version.clone()
+    };
+
+    let report = sync_repo(dir, force, false)?;
+
+    for (tgt, action) in &report.directives {
+        let msg = match action {
+            PatchAction::Created => format!("Created {} with directives block", tgt),
+            PatchAction::Appended => format!("Injected directives block into {}", tgt),
+            PatchAction::Updated => format!("Updated directives block in {}", tgt),
+            PatchAction::Unchanged => format!("Directives intact in {}", tgt),
+        };
+        items.push(msg);
     }
 
-    sync_repo(dir, force, false)
+    if let Some(ref docs_path) = report.docs_target {
+        items.push(format!("Synchronized governance documentation to {}", docs_path));
+    }
+
+    let rel_lock = report.lock_path.strip_prefix(dir).unwrap_or(&report.lock_path);
+    items.push(format!("Wrote integrity lockfile {}", rel_lock.display()));
+
+    println!(
+        "{}",
+        output::status(
+            Sym::Success,
+            format!(
+                "Initialized workspace documentation governance (Protocol v{}):",
+                target_ver
+            )
+        )
+    );
+    for (i, item) in items.iter().enumerate() {
+        let is_last = i == items.len() - 1;
+        println!("  {}{}", output::tree_branch(is_last), item);
+    }
+
+    println!();
+    println!("{}", output::bold("Next steps:"));
+    println!(
+        "  {} Run '{}' to verify documentation invariants",
+        output::bullet(),
+        output::bold("docgov check")
+    );
+    println!(
+        "  {} Review governance configuration and monitored scopes in {}",
+        output::bullet(),
+        output::cyan(".docgov.yml")
+    );
+
+    Ok(())
 }
 
-fn sync_repo(dir: &std::path::Path, force: bool, local: bool) -> Result<()> {
+pub fn sync_repo(dir: &std::path::Path, force: bool, local: bool) -> Result<SyncReport> {
     // Load configuration to discover agent directive targets, upstream and governance docs settings
     let (cfg, _) = Config::load_from_dir(dir).unwrap_or((Config::default(), None));
 
@@ -708,12 +776,9 @@ fn sync_repo(dir: &std::path::Path, force: bool, local: bool) -> Result<()> {
     lock.protocol_version = cfg.version.clone();
     lock.upstream.source = source.clone();
     lock.upstream.r#ref = r#ref.clone();
-    // Refresh the sync timestamp: this lockfile is the result of an active sync pass,
-    // and downstream consumers (audits, update staleness heuristics) rely on it being
-    // an accurate record of *when* the currently pinned artifacts were materialized.
     lock.upstream.synced_at = crate::lockfile::now_iso8601();
 
-    // 1. Synchronize agent directives (non-invasively, preserving custom guidelines & single #)
+    let mut directive_actions = Vec::new();
     for target in targets {
         let target_path = dir.join(&target);
         let existing = if target_path.exists() {
@@ -725,7 +790,6 @@ fn sync_repo(dir: &std::path::Path, force: bool, local: bool) -> Result<()> {
         let (new_content, action) =
             patch_agent_directives(existing.as_deref(), &directives_content);
 
-        // Compute hash of the directive block inside the patched content
         if let Some(block) = extract_directives_block(&new_content) {
             let block_hash = compute_sha256(block.trim());
             lock.artifacts.agent_directives = Some(ArtifactEntry {
@@ -735,91 +799,38 @@ fn sync_repo(dir: &std::path::Path, force: bool, local: bool) -> Result<()> {
         }
 
         match action {
-            PatchAction::Created => {
+            PatchAction::Created | PatchAction::Appended | PatchAction::Updated => {
                 std::fs::write(&target_path, &new_content)?;
-                println!(
-                    "{}",
-                    output::status(
-                        Sym::Create,
-                        format!(
-                            "Created {} with docgov directives block",
-                            target_path.display()
-                        )
-                    )
-                );
-            }
-            PatchAction::Appended => {
-                std::fs::write(&target_path, &new_content)?;
-                println!(
-                    "{}",
-                    output::status(
-                        Sym::Create,
-                        format!(
-                            "Non-invasively inserted docgov directives block into {}",
-                            target_path.display()
-                        )
-                    )
-                );
-            }
-            PatchAction::Updated => {
-                std::fs::write(&target_path, &new_content)?;
-                println!(
-                    "{}",
-                    output::status(
-                        Sym::Update,
-                        format!(
-                            "Updated docgov directives block in {}",
-                            target_path.display()
-                        )
-                    )
-                );
             }
             PatchAction::Unchanged => {
                 if force {
                     std::fs::write(&target_path, &new_content)?;
-                    println!(
-                        "{}",
-                        output::status(
-                            Sym::Update,
-                            format!(
-                                "Refreshed docgov directives block in {}",
-                                target_path.display()
-                            )
-                        )
-                    );
-                } else {
-                    println!(
-                        "{}",
-                        output::status(
-                            Sym::Success,
-                            format!("Directives up to date: {}", target_path.display())
-                        )
-                    );
                 }
             }
         }
+        directive_actions.push((target, action));
     }
 
-    // 2. Synchronize canonical governance documentation mirror (full atomic mirror replacement & pruning)
-    if cfg.governance_docs.install {
+    let docs_target = if cfg.governance_docs.install {
         let archive_hash =
             remote_client.sync_governance_docs(dir, &cfg.governance_docs.target_dir, force)?;
         lock.artifacts.governance_docs = Some(ArtifactEntry {
             target: cfg.governance_docs.target_dir.clone(),
             hash: archive_hash,
         });
-    }
+        Some(cfg.governance_docs.target_dir.clone())
+    } else {
+        None
+    };
 
     lock.save_to_dir(dir)?;
-    println!(
-        "{}",
-        output::status(
-            Sym::Success,
-            format!("Updated {}", DocgovLock::lockfile_path(dir).display())
-        )
-    );
+    let lock_path = DocgovLock::lockfile_path(dir);
 
-    Ok(())
+    Ok(SyncReport {
+        directives: directive_actions,
+        docs_target,
+        lock_path,
+    })
 }
 
 pub fn update_repo(
@@ -1031,6 +1042,8 @@ pub fn update_repo(
         None
     };
 
+    let mut items = Vec::new();
+
     if let Some(ref orig) = original {
         let new_source = if migrated {
             Some(canonical_source.as_str())
@@ -1039,25 +1052,43 @@ pub fn update_repo(
         };
         let patched = patch_yaml_version_ref_and_source(orig, &target_ver, &target_tag, new_source);
         std::fs::write(&docgov_yml_path, patched)?;
-        println!(
-            "{}",
-            output::status(
-                Sym::Update,
-                format!(
-                    "Updated specification declaration in {}",
-                    docgov_yml_path.display()
-                )
-            )
-        );
+        let rel_yml = docgov_yml_path.strip_prefix(dir).unwrap_or(&docgov_yml_path);
+        items.push(format!(
+            "Updated specification declaration in {}",
+            rel_yml.display()
+        ));
     }
 
     // 2. Perform synchronized asset pull and lockfile renewal with rollback on failure
-    if let Err(err) = sync_repo(dir, true, false) {
-        if let Some(ref orig) = original {
-            let _ = std::fs::write(&docgov_yml_path, orig);
+    let report = match sync_repo(dir, true, false) {
+        Ok(r) => r,
+        Err(err) => {
+            if let Some(ref orig) = original {
+                let _ = std::fs::write(&docgov_yml_path, orig);
+            }
+            return Err(err);
         }
-        return Err(err);
+    };
+
+    for (tgt, action) in &report.directives {
+        let msg = match action {
+            PatchAction::Updated => format!("Updated directives block in {}", tgt),
+            PatchAction::Created => format!("Created directives block in {}", tgt),
+            PatchAction::Appended => format!("Injected directives block into {}", tgt),
+            PatchAction::Unchanged => format!("Directives intact in {}", tgt),
+        };
+        items.push(msg);
     }
+
+    if let Some(ref d) = report.docs_target {
+        items.push(format!("Synchronized governance documentation in {}", d));
+    }
+
+    let rel_lock = report.lock_path.strip_prefix(dir).unwrap_or(&report.lock_path);
+    items.push(format!(
+        "Renewed integrity lockfile {}",
+        rel_lock.display()
+    ));
 
     println!();
     println!(
@@ -1065,20 +1096,22 @@ pub fn update_repo(
         output::status(
             Sym::Success,
             format!(
-                "Successfully updated specification to {}!",
+                "Successfully upgraded specification: {} -> {}",
+                output::yellow(&current_ref),
                 output::green(&target_tag)
             )
         )
     );
+    for (i, item) in items.iter().enumerate() {
+        let is_last = i == items.len() - 1;
+        println!("  {}{}", output::tree_branch(is_last), item);
+    }
+
+    println!();
     println!(
-        "{}",
-        output::status(
-            Sym::Info,
-            format!(
-                "Run '{}' to verify repository compliance under the new specification.",
-                output::bold("docgov check")
-            )
-        )
+        "  {} run '{}' to verify repository compliance under the new specification.\n",
+        output::cyan("hint:"),
+        output::bold("docgov check")
     );
 
     Ok(0)

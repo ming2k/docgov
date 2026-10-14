@@ -89,32 +89,52 @@ impl Diagnostic {
     /// and location always share the header line. Decoration is emitted only when
     /// color/glyph settings allow it; see [`crate::output`].
     pub fn render_terminal(&self) -> String {
-        let glyph = output::severity_glyph(&self.severity);
-        let tag = output::paint(
-            &format!("[{}]", self.rule_id),
-            output::severity_color(&self.severity),
-        );
+        let level = match self.severity {
+            Severity::Error => "error",
+            Severity::Warning => "warning",
+            Severity::Note => "note",
+        };
+        let tag = format!("{}[{}]", level, self.rule_id);
+        let colored_tag = output::paint(&tag, output::severity_color(&self.severity));
         let loc = output::cyan(&self.location_string());
+        let pipe_str = output::pipe();
 
-        let mut out = format!("  {} {}  {}\n", glyph, tag, loc);
+        let mut out = format!("{}: {}\n", colored_tag, self.message);
+        out.push_str(&format!("  {} {}\n", output::dimmed("-->"), loc));
 
         if let Some(snippet) = &self.snippet {
             let l_str = self
                 .line
                 .map(|l| l.to_string())
-                .unwrap_or_else(|| "·".to_string());
+                .unwrap_or_else(|| "-".to_string());
+            let pad = l_str.len().max(2);
             out.push_str(&format!(
-                "{:>3} {} {}\n",
+                "{:>width$} {}\n",
+                "",
+                output::dimmed(pipe_str),
+                width = pad
+            ));
+            out.push_str(&format!(
+                "{:>width$} {} {}\n",
                 output::dimmed(&l_str),
-                output::dimmed("│"),
-                snippet
+                output::dimmed(pipe_str),
+                snippet,
+                width = pad
+            ));
+            out.push_str(&format!(
+                "{:>width$} {}\n",
+                "",
+                output::dimmed(pipe_str),
+                width = pad
             ));
         }
 
-        out.push_str(&format!("  {} {}\n", output::dimmed("·"), self.message));
-
         if let Some(suggestion) = &self.suggestion {
-            out.push_str(&format!("  {} {}\n", output::green("help:"), suggestion));
+            out.push_str(&format!(
+                "   = {}: {}\n",
+                output::green("help"),
+                suggestion
+            ));
         }
 
         out
