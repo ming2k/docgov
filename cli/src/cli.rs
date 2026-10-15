@@ -437,14 +437,22 @@ fn output_diagnostics(
                 output::plural(summary.errors, "error", "errors"),
                 output::plural(summary.warnings, "warning", "warnings")
             );
+            let is_failure = summary.errors > 0;
+            let sym = if is_failure { Sym::Error } else { Sym::Warning };
+            let status_suffix = if is_failure {
+                "(Check failed)"
+            } else {
+                "(Advisory — check passed)"
+            };
             let mut verdict = output::status(
-                Sym::Error,
+                sym,
                 format!(
-                    "Found {} across {} in {:.3}s (Protocol v{}). (Check failed)",
+                    "Found {} across {} in {:.3}s (Protocol v{}). {}",
                     counts,
                     output::plural(file_count, "file", "files"),
                     duration.as_secs_f64(),
-                    protocol_version
+                    protocol_version,
+                    status_suffix
                 ),
             );
             if suppressed_count > 0 {
@@ -458,9 +466,9 @@ fn output_diagnostics(
             // Contextual actionable hints
             if diagnostics.iter().any(|d| d.rule_id == "INV-LINT-05") {
                 println!(
-                    "  {} run '{}' to automatically repair damaged directive delimiters\n",
+                    "  {} run '{}' to automatically repair managed governance assets\n",
                     output::cyan("hint:"),
-                    output::bold("docgov check --fix")
+                    output::bold("docgov fix")
                 );
             }
         }
@@ -581,6 +589,34 @@ pub fn run_fix(dir: &std::path::Path) -> Result<i32> {
         }
     }
 
+    if cfg.governance_docs.install {
+        let docs_target = &cfg.governance_docs.target_dir;
+        let mirror_dir = dir.join(docs_target);
+        let needs_restore = if !mirror_dir.is_dir() {
+            true
+        } else if let Some(ref artifact) = lock.artifacts.governance_docs {
+            match crate::remote::compute_dir_sha256(&mirror_dir) {
+                Ok(actual_hash) => actual_hash != artifact.hash,
+                Err(_) => true,
+            }
+        } else {
+            false
+        };
+
+        if needs_restore {
+            let hash = remote_client.sync_governance_docs(dir, docs_target, true)?;
+            lock.artifacts.governance_docs = Some(ArtifactEntry {
+                target: docs_target.clone(),
+                hash,
+            });
+            items.push(format!(
+                "Restored canonical governance documentation to {}",
+                docs_target
+            ));
+            fixed_count += 1;
+        }
+    }
+
     lock.protocol_version = cfg.version.clone();
     lock.upstream.source = cfg.upstream.source.clone();
     lock.upstream.r#ref = cfg.upstream.r#ref.clone();
@@ -598,7 +634,7 @@ pub fn run_fix(dir: &std::path::Path) -> Result<i32> {
             output::status(
                 Sym::Success,
                 format!(
-                    "Repaired documentation governance directives (Protocol v{}):",
+                    "Repaired documentation governance assets (Protocol v{}):",
                     cfg.version
                 )
             )
@@ -612,7 +648,7 @@ pub fn run_fix(dir: &std::path::Path) -> Result<i32> {
             "{}",
             output::status(
                 Sym::Success,
-                "All agent directives blocks in workspace are already compliant."
+                "All managed governance assets in workspace are already compliant."
             )
         );
     }

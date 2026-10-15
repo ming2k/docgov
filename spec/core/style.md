@@ -33,7 +33,6 @@ This document defines normative rules for technical writing, syntax, formatting,
   - *Avoid*: `[Taxonomy](taxonomy)` or `[ADRs](../adr/)`
 - **Case Sensitivity**: File names in links must match filesystem casing exactly (POSIX-strict).
 - **No Floating Links**: Inline links must describe the destination clearly. Never use generic labels like `[here](link.md)` or `[link](link.md)`.
-- **Firewall Compliance (`[INV-LINT-02]`)**: Never author a relative link that crosses from a public documentation surface into `docs/dev/**`.
 
 ---
 

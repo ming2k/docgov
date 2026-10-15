@@ -17,11 +17,11 @@
 
 ## 1. Summary
 
-This RFC proposes a comprehensive architectural modernization and robustness overhaul of `docgov`'s AI Agent Governance Directives (`directives.snippet` and `AGENTS.md`):
-1. **Semantic De-obfuscation & Funnel Reorganization**: Eliminate academic metaphors ("Cognitive Protocols", "4D Coordinate Tensor", "Constitution") in favor of an industrial-grade 4-step execution funnel (Hard Constraints $\rightarrow$ Architectural Decision Standards $\rightarrow$ Reference Specifications $\rightarrow$ Verification & Self-Correction Gate).
-2. **Protocol Completeness**: Incorporate the omitted `[INV-AGENT-04] Architectural Significance Threshold` into the directives block, and introduce an actionable self-correction mandate upon verification failure.
-3. **Architectural Determinism (Rejection of Dynamic Templating)**: Reaffirm that `directives.snippet` remains a static, versioned, cryptographic-hashable Sovereign Spec Asset, rejecting dynamic template rendering as unnecessary over-engineering.
-4. **Anti-Corruption & Boundary Robustness**: Support relaxed whitespace delimiter matching, provide inline anchor fallbacks, and introduce a dedicated, idempotent `docgov fix` (or `docgov check --fix`) self-healing workflow.
+This RFC proposes a comprehensive architectural modernization and robustness overhaul of `docgov`'s AI Agent Governance Directives (`default-agents.md` and `AGENTS.md`):
+1. **Progressive Disclosure & Scope Gating**: Eliminate academic metaphors and redundant mechanical linter (`INV-LINT-*`) repetition from `AGENTS.md` in favor of a compact, scope-gated routing block (`## Documentation Governance`).
+2. **Symmetric Asset Naming (`default-agents.md`)**: Rename the obscure `directives.snippet` to `spec/default-agents.md` (symmetric with `spec/default-config.yml`) and register it as a first-class template in `spec/.manifest.json`.
+3. **Architectural Determinism (Rejection of Dynamic Templating)**: Reaffirm that `default-agents.md` remains a static, versioned, cryptographic-hashable Sovereign Spec Asset, rejecting dynamic template rendering as unnecessary over-engineering.
+4. **Anti-Corruption & Boundary Robustness**: Support relaxed whitespace delimiter matching, explicit anti-tampering HTML comments, inline anchor fallbacks, and introduce a dedicated, idempotent `docgov fix` (or `docgov check --fix`) self-healing workflow.
 
 ---
 
@@ -34,7 +34,7 @@ The existing directives snippet suffers from metaphor inflation:
 - Tautological phrasing (e.g. "Canonical Reference Standards") adds verbosity without increasing semantic precision.
 
 ### 2.2 Protocol Drift & Incompleteness
-`spec/core/invariants.md` defines four cognitive invariants (including `[INV-AGENT-04]` to prevent agents from creating trivial ADRs for localized refactorings). However, `directives.snippet` currently omits `[INV-AGENT-04]`.
+`spec/core/invariants.md` defines cognitive invariants (including `[INV-AGENT-04]` to prevent agents from creating trivial ADRs for localized refactorings), while mechanical rules (`INV-LINT-01..05`) are deterministically enforced by `docgov check`. Repeating mechanical linter rules in `AGENTS.md` wastes context tokens and hijacks agent attention during non-documentation tasks.
 
 ### 2.3 Boundary Fragility in Multi-Agent Environments
 In contemporary multi-agent environments (Cursor, Claude Code, GitHub Copilot, Prettier, dprint):
@@ -46,45 +46,19 @@ In contemporary multi-agent environments (Cursor, Claude Code, GitHub Copilot, P
 
 ## 3. Proposed Design
 
-### 3.1 Directive Snippet Reorganization
-Restructure `directives.snippet` into a streamlined 4-step execution funnel:
+### 3.1 Minimal Scope-Gated `default-agents.md`
+Replace `directives.snippet` with `spec/default-agents.md`:
 
 ```markdown
 <!-- BEGIN DOCGOV DIRECTIVES -->
-<!-- CRITICAL: MANAGED BY DOCGOV. DO NOT MODIFY, MOVE, OR REMOVE DELIMITER TAGS. -->
-## Documentation Governance Directives <!-- @docgov-anchor -->
+<!-- MANAGED BY DOCGOV: DO NOT EDIT THIS BLOCK OR ITS DELIMITERS. Manual changes will fail .docgov.lock hash verification and be overwritten by `docgov fix`. -->
+## Documentation Governance <!-- @docgov-anchor -->
 
-All modifications must adhere to repository invariants and pass `docgov check`.
+> **Scope**: Applies ONLY when creating or modifying documentation (`docs/**`, root `.md`), ADRs (`docs/adr/`), or code-doc synced paths. Skip during pure code changes or Q&A.
 
-### 1. Hard Constraints (Zero-Tolerance Invariants)
-- `[INV-LINT-01] Root Whitelist`: Never create arbitrary Markdown files at the repository root. Only whitelisted files (`README.md`, `CONTRIBUTING.md`, `AGENTS.md`, etc.) are allowed.
-- `[INV-LINT-02] Scope Boundary`: Public documentation (`docs/{tutorials,how-to,reference,explanation}/`) MUST NEVER link to internal contributor docs (`docs/dev/**`).
-- `[INV-LINT-03] Frontmatter Schema`: Every ADR in `docs/adr/` must declare valid YAML frontmatter (`id`, `title`, `status`, `date`).
-- `[INV-LINT-04] Code-Doc Sync`: Modifying monitored paths in `src/` requires updating corresponding `docs/` in the same change.
-- `[INV-LINT-05] Directives Integrity`: Never remove, reformat, or strip boundary delimiters (`<!-- BEGIN/END DOCGOV DIRECTIVES -->`) when modifying agent configuration files.
-
-### 2. Architectural Decision Standards (Reasoning Principles)
-- `[INV-AGENT-01] Rejected Alternatives`: Every new ADR MUST document discarded options and their specific failure modes.
-- `[INV-AGENT-02] Historical State Routing`:
-  - New implementations: DO NOT use `superseded` or `rejected` ADRs as active patterns.
-  - Refactoring & investigations: MUST inspect `superseded` ADRs to learn from historical failure modes.
-- `[INV-AGENT-03] Blameless Postmortems`: Incident postmortems must focus strictly on timeline, detection gaps, and systemic defense failures, prohibiting personal human blame.
-- `[INV-AGENT-04] Architectural Significance Threshold`: Only author ADRs for decisions with high reversal cost or cross-boundary blast radius (skip localized or trivial refactorings).
-
-### 3. Reference Specifications (Authoritative Standards)
-Before drafting or restructuring documentation, inspect the local governance specifications:
-- Taxonomy & Layout (Diátaxis): `docs/governance/documentation/core/taxonomy.md`
-- System Invariants: `docs/governance/documentation/core/invariants.md`
-- Style & Hyperlink Rules: `docs/governance/documentation/core/style.md`
-- ADR & RFC Standards: `docs/governance/documentation/profiles/architecture/adr.md`
-- Quality & Verification: `docs/governance/documentation/profiles/validation/testing.md`
-
-### 4. Verification & Self-Correction Gate
-Run verification before completing any task:
-```bash
-docgov check
-```
-If violations are detected, inspect diagnostic suggestions and resolve them within the current turn.
+1. **Read Specs on Demand**: Before drafting or restructuring docs, inspect `docs/governance/documentation/` (`core/taxonomy.md`, `core/invariants.md`, `core/style.md`, and `profiles/architecture/adr.md`).
+2. **ADR Reasoning (`[INV-AGENT-01/02/04]`)**: Author ADRs only for high-impact architectural decisions (skip trivial refactorings); always document rejected alternatives; never use `superseded`/`rejected` ADRs as active patterns.
+3. **Lazy Verification**: Run `docgov check` before final hand-off ONLY when documentation, governance files, or monitored source paths (`[INV-LINT-04]`) are modified.
 <!-- END DOCGOV DIRECTIVES -->
 ```
 

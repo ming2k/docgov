@@ -79,10 +79,10 @@ impl Diagnostic {
     /// snippet, with/without suggestion) so that a log is scannable:
     ///
     /// ```text
-    ///   × [INV-LINT-02]  docs/tutorials/quick.md:3:5
-    ///   3 │ See [dev](../dev/setup.md).
-    ///   · Public document contains relative link into internal surface 'docs/dev/setup.md'
-    ///   help: Move shared concepts into public documentation (e.g. 'docs/explanation/').
+    ///   × [INV-LINT-05]  AGENTS.md:24:1
+    ///   24 │ <!-- BEGIN DOCGOV DIRECTIVES -->
+    ///   · Directives block in 'AGENTS.md' is missing closing delimiter tag '<!-- END DOCGOV DIRECTIVES -->'
+    ///   help: Run `docgov fix` to restore the delimiter comments.
     /// ```
     ///
     /// The severity glyph (`×` / `!` / `i`) is distinct per severity, and the rule id

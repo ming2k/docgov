@@ -10,7 +10,7 @@ impl Rule for RootSanitizerRule {
     }
 
     fn description(&self) -> &'static str {
-        "Location Sanitization: Prohibit unapproved Markdown files at repository root"
+        "Location Sanitization: Advisory guidance against unapproved Markdown files at repository root"
     }
 
     fn check(&self, ctx: &LintContext) -> Result<Vec<Diagnostic>> {
@@ -34,7 +34,7 @@ impl Rule for RootSanitizerRule {
                     let file_name = file.file_name().unwrap_or_default().to_string_lossy();
                     if !allowed.contains(file_name.as_ref()) {
                         diagnostics.push(
-                            Diagnostic::error(
+                            Diagnostic::warning(
                                 self.id(),
                                 format!(
                                     "Unapproved Markdown file at repository root: '{}'",

@@ -16,7 +16,6 @@ Implementation testing provides fast inner-loop feedback for developers:
 
 - **Deterministic Reproducibility**: Automated test commands documented in `docs/dev/testing.md` must execute predictably without unversioned network dependencies, hidden local caches, or undeclared environment variables.
 - **`[INV-LINT-04]` Code-Doc Synchronization**: When test runner commands, environment flags, or CI test topologies change, `docs/dev/testing.md` must be updated in the same Pull Request.
-- **`[INV-LINT-02]` Contributor Firewall**: `docs/dev/testing.md` resides in `docs/dev/` behind the contributor firewall; user-facing documentation must not link directly into it.
 
 ---
 

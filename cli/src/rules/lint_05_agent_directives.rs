@@ -113,7 +113,7 @@ fn find_next_major_heading(text: &str) -> Option<usize> {
     None
 }
 
-/// Extract primary Markdown heading from the spec snippet (e.g. "## Documentation Governance Directives")
+/// Extract primary Markdown heading from the spec template (e.g. "## Documentation Governance")
 pub fn extract_primary_heading(snippet: &str) -> Option<&str> {
     for line in snippet.lines() {
         let trimmed = line.trim();
@@ -129,8 +129,7 @@ pub fn patch_agent_directives(
     snippet: &str,
 ) -> (String, PatchAction) {
     let snippet = snippet.trim();
-    let detected_heading =
-        extract_primary_heading(snippet).unwrap_or("## Documentation Governance Directives");
+    let detected_heading = extract_primary_heading(snippet).unwrap_or("## Documentation Standards");
     let clean_heading = detected_heading
         .split("<!--")
         .next()
@@ -247,128 +246,164 @@ impl Rule for AgentDirectivesRule {
     }
 
     fn description(&self) -> &'static str {
-        "Agent Directives Binding: AI assistant configuration must contain docgov anchor directives"
+        "Managed Governance Assets Integrity: Protect agent directives block and specification mirror"
     }
 
     fn check(&self, ctx: &LintContext) -> Result<Vec<Diagnostic>> {
         let mut diagnostics = Vec::new();
 
-        if !ctx.config.agent_directives.enforce {
-            return Ok(diagnostics);
-        }
-
         let lock = DocgovLock::load_from_dir(ctx.workspace_root).ok().flatten();
 
-        for target in &ctx.config.agent_directives.targets {
-            let target_path = ctx.workspace_root.join(target);
-            let rel_target = std::path::PathBuf::from(target);
+        if ctx.config.agent_directives.enforce {
+            for target in &ctx.config.agent_directives.targets {
+                let target_path = ctx.workspace_root.join(target);
+                let rel_target = std::path::PathBuf::from(target);
 
-            if !target_path.exists() {
-                diagnostics.push(
-                    Diagnostic::error(
-                        self.id(),
-                        format!("Missing agent directives configuration file '{}'", target),
-                        rel_target,
-                    )
-                    .with_suggestion("Run `docgov fix` (or `docgov init`) to create it with the non-invasive docgov directives block."),
-                );
-                continue;
-            }
-
-            let content = match std::fs::read_to_string(&target_path) {
-                Ok(c) => c,
-                Err(_) => {
-                    diagnostics.push(Diagnostic::error(
-                        self.id(),
-                        format!("Failed to read agent configuration file '{}'", target),
-                        rel_target,
-                    ));
+                if !target_path.exists() {
+                    diagnostics.push(
+                        Diagnostic::error(
+                            self.id(),
+                            format!("Missing agent directives configuration file '{}'", target),
+                            rel_target,
+                        )
+                        .with_suggestion("Run `docgov fix` (or `docgov init`) to create it with the non-invasive docgov directives block."),
+                    );
                     continue;
                 }
-            };
 
-            let begin_opt = find_begin_delimiter_span(&content);
-            let end_opt = begin_opt.and_then(|(b_start, _)| {
-                find_end_delimiter_span(&content[b_start..])
-                    .map(|(_, e_rel_end)| b_start + e_rel_end)
-            });
+                let content = match std::fs::read_to_string(&target_path) {
+                    Ok(c) => c,
+                    Err(_) => {
+                        diagnostics.push(Diagnostic::error(
+                            self.id(),
+                            format!("Failed to read agent configuration file '{}'", target),
+                            rel_target,
+                        ));
+                        continue;
+                    }
+                };
 
-            match (begin_opt, end_opt) {
-                (Some((begin_idx, _)), Some(end_idx)) => {
-                    // Check against lockfile if present
-                    if let Some(ref lockfile) = lock {
-                        if let Some(ref artifact) = lockfile.artifacts.agent_directives {
-                            if artifact.target == *target {
-                                let block_slice = content[begin_idx..end_idx].trim();
-                                let actual_hash = compute_sha256(block_slice);
-                                if actual_hash != artifact.hash {
-                                    let line_num = content[..begin_idx].lines().count().max(1);
-                                    diagnostics.push(
-                                        Diagnostic::warning(
-                                            self.id(),
-                                            format!(
-                                                "Directives block in '{}' drifted from .docgov.lock (expected {}, got {})",
-                                                target, artifact.hash, actual_hash
-                                            ),
-                                            rel_target.clone(),
-                                        )
-                                        .with_location(line_num, 1)
-                                        .with_suggestion("Run `docgov fix` (or `docgov update`) to re-synchronize directives with upstream lockfile."),
-                                    );
+                let begin_opt = find_begin_delimiter_span(&content);
+                let end_opt = begin_opt.and_then(|(b_start, _)| {
+                    find_end_delimiter_span(&content[b_start..])
+                        .map(|(_, e_rel_end)| b_start + e_rel_end)
+                });
+
+                match (begin_opt, end_opt) {
+                    (Some((begin_idx, _)), Some(end_idx)) => {
+                        // Check against lockfile if present
+                        if let Some(ref lockfile) = lock {
+                            if let Some(ref artifact) = lockfile.artifacts.agent_directives {
+                                if artifact.target == *target {
+                                    let block_slice = content[begin_idx..end_idx].trim();
+                                    let actual_hash = compute_sha256(block_slice);
+                                    if actual_hash != artifact.hash {
+                                        let line_num = content[..begin_idx].lines().count().max(1);
+                                        diagnostics.push(
+                                            Diagnostic::error(
+                                                self.id(),
+                                                format!(
+                                                    "Managed directives block in '{}' was modified and drifted from .docgov.lock (expected {}, got {}). Managed regions must not be edited manually.",
+                                                    target, artifact.hash, actual_hash
+                                                ),
+                                                rel_target.clone(),
+                                            )
+                                            .with_location(line_num, 1)
+                                            .with_suggestion("Run `docgov fix` (or `docgov update`) to restore the canonical directives block."),
+                                        );
+                                    }
                                 }
                             }
                         }
                     }
-                }
-                (Some((begin_idx, _)), None) => {
-                    let line_num = content[..begin_idx].lines().count().max(1);
-                    diagnostics.push(
-                        Diagnostic::error(
-                            self.id(),
-                            format!(
-                                "Directives block in '{}' is missing closing delimiter tag '{}'. AI assistants and editors must preserve boundary comments.",
-                                target, DOCGOV_DIRECTIVES_END
-                            ),
-                            rel_target,
-                        )
-                        .with_location(line_num, 1)
-                        .with_suggestion("Run `docgov fix` to restore the delimiter comments."),
-                    );
-                }
-                _ => {
-                    let line_num = content.lines().count().max(1);
-                    let looks_corrupted = is_end_tag(&content)
-                        || content.contains(DOCGOV_DIRECTIVES_END)
-                        || content.contains("@docgov-anchor")
-                        || content.contains("Documentation Governance Directives")
-                        || content.contains("Hard Constraints (Zero-Tolerance Invariants)")
-                        || content.contains("Machine Invariants (Pre-Submit Checklist)");
-                    if looks_corrupted {
+                    (Some((begin_idx, _)), None) => {
+                        let line_num = content[..begin_idx].lines().count().max(1);
                         diagnostics.push(
                             Diagnostic::error(
                                 self.id(),
                                 format!(
-                                    "Docgov anchor boundary comments were stripped or corrupted in '{}'. AI assistants must preserve '{}' and '{}' verbatim without reorganizing.",
-                                    target, DOCGOV_DIRECTIVES_BEGIN, DOCGOV_DIRECTIVES_END
+                                    "Directives block in '{}' is missing closing delimiter tag '{}'. AI assistants and editors must preserve boundary comments.",
+                                    target, DOCGOV_DIRECTIVES_END
                                 ),
                                 rel_target,
                             )
                             .with_location(line_num, 1)
-                            .with_suggestion("Run `docgov fix` to restore the boundary comments."),
+                            .with_suggestion("Run `docgov fix` to restore the delimiter comments."),
                         );
-                    } else {
+                    }
+                    _ => {
+                        let line_num = content.lines().count().max(1);
+                        let looks_corrupted = is_end_tag(&content)
+                            || content.contains(DOCGOV_DIRECTIVES_END)
+                            || content.contains("@docgov-anchor")
+                            || content.contains("Documentation Standards")
+                            || content.contains("Documentation Governance");
+                        if looks_corrupted {
+                            diagnostics.push(
+                                Diagnostic::error(
+                                    self.id(),
+                                    format!(
+                                        "Docgov anchor boundary comments were stripped or corrupted in '{}'. AI assistants must preserve '{}' and '{}' verbatim without reorganizing.",
+                                        target, DOCGOV_DIRECTIVES_BEGIN, DOCGOV_DIRECTIVES_END
+                                    ),
+                                    rel_target,
+                                )
+                                .with_location(line_num, 1)
+                                .with_suggestion("Run `docgov fix` to restore the boundary comments."),
+                            );
+                        } else {
+                            diagnostics.push(
+                                Diagnostic::error(
+                                    self.id(),
+                                    format!(
+                                        "Missing docgov anchor directives block in '{}'",
+                                        target
+                                    ),
+                                    rel_target,
+                                )
+                                .with_location(line_num, 1)
+                                .with_suggestion("Run `docgov fix` (or `docgov init`) to insert the non-invasive docgov directives block without overwriting existing instructions."),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+
+        // Managed Zone 2: Verify read-only governance documentation mirror
+        if ctx.config.governance_docs.install {
+            if let Some(ref lockfile) = lock {
+                if let Some(ref artifact) = lockfile.artifacts.governance_docs {
+                    let mirror_path = ctx.workspace_root.join(&artifact.target);
+                    let rel_mirror = std::path::PathBuf::from(&artifact.target);
+
+                    if !mirror_path.is_dir() {
                         diagnostics.push(
                             Diagnostic::error(
                                 self.id(),
                                 format!(
-                                    "Missing docgov anchor directives block in '{}'",
-                                    target
+                                    "Missing managed governance documentation mirror '{}'",
+                                    artifact.target
                                 ),
-                                rel_target,
+                                rel_mirror,
                             )
-                            .with_location(line_num, 1)
-                            .with_suggestion("Run `docgov fix` (or `docgov init`) to insert the non-invasive docgov directives block without overwriting existing instructions."),
+                            .with_suggestion("Run `docgov fix` (or `docgov update`) to restore the canonical documentation mirror."),
                         );
+                    } else if let Ok(actual_hash) = crate::remote::compute_dir_sha256(&mirror_path)
+                    {
+                        if actual_hash != artifact.hash {
+                            diagnostics.push(
+                                Diagnostic::error(
+                                    self.id(),
+                                    format!(
+                                        "Managed governance documentation mirror in '{}' drifted from .docgov.lock (expected {}, got {}). Managed regions must not be edited manually.",
+                                        artifact.target, artifact.hash, actual_hash
+                                    ),
+                                    rel_mirror,
+                                )
+                                .with_suggestion("Run `docgov fix` (or `docgov update`) to restore the canonical documentation mirror."),
+                            );
+                        }
                     }
                 }
             }

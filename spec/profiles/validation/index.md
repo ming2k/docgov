@@ -54,5 +54,4 @@ A core engineering principle is decoupling **Acceptance Criteria** (what/why) fr
 
 ## 3. Invariant Governance
 
-- **`[INV-LINT-02]` Contributor Firewall**: Both `acceptance.md` and `testing.md` live within `docs/dev/`. User-facing documentation must never link directly into internal validation docs.
 - **`[INV-LINT-04]` Code-Doc Synchronization**: Introducing new user-visible capabilities requires updating `docs/dev/acceptance.md`; altering test runners or suite structures requires updating `docs/dev/testing.md`.

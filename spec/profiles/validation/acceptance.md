@@ -17,7 +17,6 @@ Acceptance defines the contractual agreement on what constitutes deliverable sof
 
 - **Real User Interface Parity**: Acceptance journeys must exercise the system strictly through documented public interfaces, CLI commands, or APIs from a cold start, without invoking synthetic test backdoors or private mock overrides.
 - **`[INV-LINT-04]` Code-Doc Synchronization**: When a user-visible feature or capability is introduced, changed, or retired, `docs/dev/acceptance.md` must be updated in the same Pull Request.
-- **`[INV-LINT-02]` Contributor Firewall**: `docs/dev/acceptance.md` lives behind the contributor firewall; public user-facing documentation must never link directly into it.
 
 ---
 

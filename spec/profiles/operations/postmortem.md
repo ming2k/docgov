@@ -17,8 +17,6 @@ Postmortems capture forensic truth following outages, data corruption, or severe
 
 - **`[INV-AGENT-03]` Blameless Postmortem Structure**:
   Post-incident reviews must focus strictly on timeline reconstruction, detection gaps, and systemic defense failures. Attribution of personal human error, negligence, or blame is strictly prohibited.
-- **`[INV-LINT-02]` Contributor Firewall**:
-  Postmortems reside under `docs/dev/postmortems/` behind the contributor firewall. Public user-facing documentation must never contain relative links into postmortems.
 - **Permanent Cold Retention**:
   Postmortems are permanent cold-tier forensic records. They must never be deleted or truncated.
 

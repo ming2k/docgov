@@ -106,28 +106,33 @@ impl RemoteClient {
         // 1. Check local spec first if available
         if let Some(ws) = workspace_root {
             if let Some(spec_dir) = self.local_spec_dir(ws) {
-                let manifest_file = spec_dir.join(".manifest.json");
-                if manifest_file.is_file() {
-                    let content = fs::read_to_string(&manifest_file)?;
-                    let v: serde_json::Value = serde_json::from_str(&content).map_err(|e| {
-                        anyhow::anyhow!(
-                            "Failed to parse specification manifest {}: {}",
-                            manifest_file.display(),
-                            e
-                        )
-                    })?;
-                    if let Some(ver) = v.get("protocol_version").and_then(|v| v.as_str()) {
-                        let ver = ver.trim();
-                        let tag = if ver.starts_with('v') {
-                            ver.to_string()
-                        } else {
-                            format!("v{}", ver)
-                        };
-                        return Ok(LatestReleaseInfo {
-                            tag_name: tag,
-                            published_at: None,
-                            html_url: Some(format!("file://{}", spec_dir.display())),
-                        });
+                let config_file = if spec_dir.join("default-config.yml").is_file() {
+                    spec_dir.join("default-config.yml")
+                } else if spec_dir.join("spec/default-config.yml").is_file() {
+                    spec_dir.join("spec/default-config.yml")
+                } else {
+                    PathBuf::new()
+                };
+                if config_file.is_file() {
+                    if let Ok(content) = fs::read_to_string(&config_file) {
+                        for line in content.lines() {
+                            let trimmed = line.trim();
+                            if let Some(rest) = trimmed.strip_prefix("version:") {
+                                let ver = rest.trim().trim_matches('"').trim_matches('\'').trim();
+                                if !ver.is_empty() {
+                                    let tag = if ver.starts_with('v') {
+                                        ver.to_string()
+                                    } else {
+                                        format!("v{}", ver)
+                                    };
+                                    return Ok(LatestReleaseInfo {
+                                        tag_name: tag,
+                                        published_at: None,
+                                        html_url: Some(format!("file://{}", spec_dir.display())),
+                                    });
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -325,9 +330,10 @@ impl RemoteClient {
             return Some(ws_relative);
         }
 
-        // Monorepo root check: workspace itself contains spec/ with .manifest.json & directives.snippet
+        // Monorepo root check: workspace itself contains spec/ with default-agents.md & default-config.yml
         let ws_spec = workspace_root.join("spec");
-        if ws_spec.join("directives.snippet").is_file() && ws_spec.join(".manifest.json").is_file()
+        if ws_spec.join("default-agents.md").is_file()
+            && ws_spec.join("default-config.yml").is_file()
         {
             return Some(ws_spec);
         }
@@ -422,25 +428,25 @@ impl RemoteClient {
         );
     }
 
-    /// Fetch directives snippet with local-spec, cache-first, and remote-network strategy.
+    /// Fetch agent directives template with local-spec, cache-first, and remote-network strategy.
     /// Fails deterministically if the asset is not reachable.
     pub fn fetch_directives(&self, workspace_root: Option<&Path>) -> Result<(String, String)> {
         // 1. Local workspace specification source check
         if let Some(ws) = workspace_root {
             if let Some(spec_dir) = self.local_spec_dir(ws) {
-                let candidate_file = if spec_dir.join("directives.snippet").is_file() {
-                    spec_dir.join("directives.snippet")
-                } else if spec_dir.join("spec/directives.snippet").is_file() {
-                    spec_dir.join("spec/directives.snippet")
+                let candidate_file = if spec_dir.join("default-agents.md").is_file() {
+                    spec_dir.join("default-agents.md")
+                } else if spec_dir.join("spec/default-agents.md").is_file() {
+                    spec_dir.join("spec/default-agents.md")
                 } else {
                     anyhow::bail!(
-                        "Local governance directory '{}' does not contain 'directives.snippet'.",
+                        "Local governance directory '{}' does not contain 'default-agents.md'.",
                         spec_dir.display()
                     );
                 };
                 let content = fs::read_to_string(&candidate_file).with_context(|| {
                     format!(
-                        "Failed to read local snippet at {}",
+                        "Failed to read local agent directives template at {}",
                         candidate_file.display()
                     )
                 })?;
@@ -449,7 +455,7 @@ impl RemoteClient {
         }
 
         let cache_dir = self.get_cache_dir();
-        let cache_file = cache_dir.join("directives.snippet");
+        let cache_file = cache_dir.join("default-agents.md");
 
         // 2. Cache hit check: if cached locally, use immediately without network call
         if cache_file.exists() {
@@ -625,11 +631,15 @@ impl RemoteClient {
                 path_str.to_string()
             };
 
-            if rel_path.is_empty()
-                || rel_path == "directives.snippet"
+            let is_excluded = rel_path.is_empty()
+                || rel_path == "default-agents.md"
+                || rel_path == "default-config.yml"
+                || rel_path == ".manifest.json"
+                || rel_path == "core/invariants.md"
+                || rel_path == "core/workflow.md"
                 || rel_path.starts_with(".git")
-                || rel_path.starts_with(".github")
-            {
+                || rel_path.starts_with(".github");
+            if is_excluded {
                 continue;
             }
 
@@ -737,27 +747,27 @@ impl RemoteClient {
         vec![
             // 1. GitHub Release asset under spec-v* tag (canonical monorepo release)
             format!(
-                "https://github.com/{}/{}/releases/download/spec-v{}/directives.snippet",
+                "https://github.com/{}/{}/releases/download/spec-v{}/default-agents.md",
                 owner, repo, clean_ver
             ),
             // 2. GitHub Release asset under given ref tag
             format!(
-                "https://github.com/{}/{}/releases/download/{}/directives.snippet",
+                "https://github.com/{}/{}/releases/download/{}/default-agents.md",
                 owner, repo, self.r#ref
             ),
             // 3. Raw GitHub content under spec-v* tag (docgov monorepo layout)
             format!(
-                "https://raw.githubusercontent.com/{}/{}/spec-v{}/spec/directives.snippet",
+                "https://raw.githubusercontent.com/{}/{}/spec-v{}/spec/default-agents.md",
                 owner, repo, clean_ver
             ),
             // 4. Raw GitHub content in spec/ subdirectory (docgov monorepo layout)
             format!(
-                "https://raw.githubusercontent.com/{}/{}/{}/spec/directives.snippet",
+                "https://raw.githubusercontent.com/{}/{}/{}/spec/default-agents.md",
                 owner, repo, self.r#ref
             ),
-            // 5. Direct root directives.snippet in standalone repository
+            // 5. Direct root default-agents.md in standalone repository
             format!(
-                "https://raw.githubusercontent.com/{}/{}/{}/directives.snippet",
+                "https://raw.githubusercontent.com/{}/{}/{}/default-agents.md",
                 owner, repo, self.r#ref
             ),
         ]
@@ -804,10 +814,13 @@ fn copy_dir_all(src: &Path, dst: &Path, include_directives: bool) -> Result<()> 
         let from = entry.path();
         let file_name = entry.file_name();
         let name_str = file_name.to_string_lossy();
-        if name_str.starts_with(".git")
+        let is_excluded = name_str.starts_with(".git")
             || name_str.starts_with(".github")
-            || (!include_directives && name_str == "directives.snippet")
-        {
+            || name_str == "default-agents.md"
+            || name_str == "default-config.yml"
+            || name_str == ".manifest.json"
+            || (!include_directives && (name_str == "invariants.md" || name_str == "workflow.md"));
+        if is_excluded {
             continue;
         }
         let to = dst.join(file_name);
@@ -820,7 +833,7 @@ fn copy_dir_all(src: &Path, dst: &Path, include_directives: bool) -> Result<()> 
     Ok(())
 }
 
-fn compute_dir_sha256(dir: &Path) -> Result<String> {
+pub fn compute_dir_sha256(dir: &Path) -> Result<String> {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     let mut entries = Vec::new();

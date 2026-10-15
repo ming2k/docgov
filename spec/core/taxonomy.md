@@ -13,7 +13,7 @@ Governs maintenance frequency, update urgency, and AI agent context-loading prio
 | :--- | :--- | :--- | :--- |
 | **HOT** | Living ground truth (`README.md`, `docs/{tutorials,how-to,reference,explanation}/`, `docs/architecture/`). | Synchronous: updated in the same change as code (`[INV-LINT-04]`). | Primary context window for daily coding, generation, and review. |
 | **WARM** | Active decision contracts and proposals (`docs/adr/`, `docs/rfc/`). | Transactional: created or updated upon architectural review. | Consulted just-in-time during architectural reasoning. |
-| **COLD** | Historical rationale, retired decisions, and postmortems (`docs/dev/postmortems/`, superseded ADRs). | Permanent in-place retention (`status: superseded \| rejected`). | Excluded from generative mode (`[INV-AGENT-02]`); retrieved during forensics and refactoring. |
+| **COLD** | Historical rationale, retired decisions, and postmortems (`docs/dev/postmortems/`, superseded ADRs). | Permanent in-place retention (`status: superseded | rejected`). | Excluded from generative mode (`[INV-AGENT-02]`); retrieved during forensics and refactoring. |
 
 ---
 
@@ -40,17 +40,16 @@ Knowledge evolves in-place through YAML frontmatter transitions without physical
 
 ---
 
-## 3. Audience Isolation (Contributor Firewall)
+## 3. Audience Layering (Public vs Contributor Surfaces)
 
-Enforces strict separation between public consumers and internal maintainers:
+Distinguishes general consumer documentation from internal contributor knowledge:
 
 ```text
 ┌─────────────────────────────────────────────────────────────┐
 │ Public Surface (External Users & Integrators)               │
 │ `docs/tutorials/`, `how-to/`, `reference/`, `explanation/`  │
 └──────────────────────────────┬──────────────────────────────┘
-                               │ [INV-LINT-02] Contributor Firewall:
-                               │ Public NEVER links into Internal
+                               │ Progressive cross-references
                                ▼
 ┌─────────────────────────────────────────────────────────────┐
 │ Internal Surface (Maintainers & Core Contributors)          │
@@ -59,8 +58,8 @@ Enforces strict separation between public consumers and internal maintainers:
 ```
 
 - **Public Surface (`docs/{tutorials,how-to,reference,explanation}/`)**: Consumed by external developers and end-users.
-- **Internal Surface (`docs/dev/`)**: Protected environment setup, test topologies, acceptance sign-offs, and incident postmortems.
-- **Firewall Rule (`[INV-LINT-02]`)**: Public documentation must never contain relative links into `docs/dev/`. Internal documentation may freely link outward to public documentation.
+- **Internal Surface (`docs/dev/`)**: Environment setup, test topologies, acceptance sign-offs, and incident postmortems.
+- **Permissive Navigation**: Documentation may reference internal developer workflows where helpful; dogmatic relative link blocking (`[INV-LINT-02]`) is retired.
 
 ---
 
@@ -79,11 +78,11 @@ Public living documentation is organized into four distinct cognitive modes:
 
 ## 5. Repository Layout & Root Whitelist
 
-To eliminate root clutter, arbitrary Markdown files at the repository root are strictly forbidden (`[INV-LINT-01]`). Only whitelisted files are permitted:
+To eliminate root clutter, arbitrary Markdown files at the repository root are discouraged (`[INV-LINT-01]`). Standard whitelisted root files include:
 
 | Root File | Governance Role | Constraints |
 | :--- | :--- | :--- |
-| `.docgov.yml` | Declarative SSOT | Configuration for rules, firewalls, and path triggers. |
+| `.docgov.yml` | Declarative SSOT | Configuration for rules, managed mirrors, and triggers. |
 | `AGENTS.md` | AI Guardrail | Machine directives and invariant bindings. |
 | `README.md` | Public Pitch & Gateway | High-level overview; routes deep dives into `docs/`. |
 | `CHANGELOG.md` | Release Ledger | User-facing changelog per version. |
@@ -91,4 +90,4 @@ To eliminate root clutter, arbitrary Markdown files at the repository root are s
 | `SECURITY.md` | Disclosure Policy | Vulnerability reporting procedures. |
 | `LICENSE` / `LICENSE.md` | Legal | Unaltered license text. |
 
-All other project documentation must reside within the structured `docs/` hierarchy.
+All other project documentation should reside within the structured `docs/` hierarchy.

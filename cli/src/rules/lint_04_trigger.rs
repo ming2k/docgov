@@ -11,7 +11,7 @@ impl Rule for GitSyncTriggerRule {
     }
 
     fn description(&self) -> &'static str {
-        "Code-Doc Synchronization Trigger: Monitored code changes require synchronized doc updates"
+        "Code-Doc Synchronization Trigger: Advisory reminder to synchronize documentation when code changes"
     }
 
     fn check(&self, ctx: &LintContext) -> Result<Vec<Diagnostic>> {
@@ -39,13 +39,13 @@ impl Rule for GitSyncTriggerRule {
                     let requirement_desc = trigger.require_update.join("' or '");
                     let msg = trigger.message.clone().unwrap_or_else(|| {
                         format!(
-                            "Monitored path '{}' modified, but none of the required documentation surfaces ('{}') were updated",
+                            "Monitored path '{}' modified, but none of the recommended documentation surfaces ('{}') were updated",
                             trigger.watch, requirement_desc
                         )
                     });
 
                     diagnostics.push(
-                        Diagnostic::error(self.id(), msg, source_file).with_suggestion(format!(
+                        Diagnostic::warning(self.id(), msg, source_file).with_suggestion(format!(
                             "Update matching documentation in '{}' in the same change.",
                             requirement_desc
                         )),

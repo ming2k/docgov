@@ -50,8 +50,9 @@ jobs:
           # Also create canonical docgov-assets.tar.gz for backwards compatibility
           cp "dist/docgov-spec-${CLEAN_VER}.tar.gz" "dist/docgov-assets.tar.gz"
 
-          # Copy standalone directives snippet
-          cp spec/directives.snippet dist/directives.snippet
+          # Copy standalone adoption templates
+          cp spec/default-agents.md dist/default-agents.md
+          cp spec/default-config.yml dist/default-config.yml
 
           # Generate SHA-256 checksums
           cd dist
@@ -73,7 +74,8 @@ jobs:
             dist/dog-spec-*.tar.gz.sha256
             dist/docgov-assets.tar.gz
             dist/docgov-assets.tar.gz.sha256
-            dist/directives.snippet
+            dist/default-agents.md
+            dist/default-config.yml
           draft: false
           prerelease: false
           make_latest: false

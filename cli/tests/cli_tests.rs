@@ -9,15 +9,11 @@ use docgov::rules::Rule;
 use std::fs;
 use tempfile::tempdir;
 
-const SAMPLE_SNIPPET: &str = include_str!("fixtures/directives.snippet");
+const SAMPLE_SNIPPET: &str = include_str!("fixtures/default-agents.md");
 
 fn write_mock_spec_manifest(dir: &std::path::Path, version: &str) {
-    let manifest = serde_json::json!({
-        "schema": "docgov/manifest",
-        "schema_version": 2,
-        "protocol_version": version,
-    });
-    fs::write(dir.join(".manifest.json"), manifest.to_string()).unwrap();
+    let config = format!("version: \"{}\"\n", version);
+    fs::write(dir.join("default-config.yml"), config).unwrap();
 }
 
 #[test]
@@ -32,45 +28,62 @@ fn test_lint_01_root_sanitizer() {
     let engine = LintEngine::new(root).unwrap();
     let diagnostics = engine.run_lint(None).unwrap();
 
-    let root_errors: Vec<_> = diagnostics
+    let root_warnings: Vec<_> = diagnostics
         .iter()
         .filter(|d| d.rule_id == "INV-LINT-01")
         .collect();
 
-    assert_eq!(root_errors.len(), 1);
-    assert!(root_errors[0].message.contains("FORBIDDEN.md"));
+    assert_eq!(root_warnings.len(), 1);
+    assert_eq!(root_warnings[0].severity, docgov::Severity::Warning);
+    assert!(root_warnings[0].message.contains("FORBIDDEN.md"));
 }
 
 #[test]
-fn test_lint_02_contributor_firewall() {
+fn test_lint_05_managed_zone_governance_docs_protection() {
     let dir = tempdir().unwrap();
     let root = dir.path();
 
-    // Setup public and internal docs
-    let tut_dir = root.join("docs/tutorials");
-    let dev_dir = root.join("docs/dev");
-    fs::create_dir_all(&tut_dir).unwrap();
-    fs::create_dir_all(&dev_dir).unwrap();
+    // Valid agent directives configuration
+    fs::write(root.join("AGENTS.md"), SAMPLE_SNIPPET).unwrap();
 
-    fs::write(dev_dir.join("setup.md"), "# Setup").unwrap();
-    // Public doc linking into internal dev space
-    fs::write(
-        tut_dir.join("quickstart.md"),
-        "# Quickstart\n\nFor details, see [Dev Setup](../dev/setup.md).\n",
-    )
-    .unwrap();
+    // Setup managed governance docs mirror
+    let mirror = root.join("docs/governance/documentation/core");
+    fs::create_dir_all(&mirror).unwrap();
+    let tax_file = mirror.join("taxonomy.md");
+    fs::write(&tax_file, "# Canonical Taxonomy\n").unwrap();
 
+    let target_dir = "docs/governance/documentation";
+    let initial_hash = docgov::remote::compute_dir_sha256(&root.join(target_dir)).unwrap();
+
+    let mut lock =
+        docgov::lockfile::DocgovLock::new("0.0.4", "https://github.com/ming2k/docgov", "v0.0.4");
+    lock.artifacts.agent_directives = Some(docgov::lockfile::ArtifactEntry {
+        target: "AGENTS.md".to_string(),
+        hash: docgov::lockfile::compute_sha256(SAMPLE_SNIPPET.trim()),
+    });
+    lock.artifacts.governance_docs = Some(docgov::lockfile::ArtifactEntry {
+        target: target_dir.to_string(),
+        hash: initial_hash,
+    });
+    lock.save_to_dir(root).unwrap();
+
+    // Clean check passes without managed zone diagnostics
     let engine = LintEngine::new(root).unwrap();
-    let diagnostics = engine.run_lint(None).unwrap();
+    let diags = engine.run_lint(None).unwrap();
+    assert!(!diags.iter().any(|d| d.rule_id == "INV-LINT-05"));
 
-    let firewall_errors: Vec<_> = diagnostics
+    // Tamper with managed mirror file
+    fs::write(&tax_file, "# Tampered Content by AI\n").unwrap();
+    let diags_tampered = engine.run_lint(None).unwrap();
+    let errs: Vec<_> = diags_tampered
         .iter()
-        .filter(|d| d.rule_id == "INV-LINT-02")
+        .filter(|d| d.rule_id == "INV-LINT-05" && d.severity == docgov::Severity::Error)
         .collect();
-
-    assert_eq!(firewall_errors.len(), 1);
-    assert_eq!(firewall_errors[0].line, Some(3));
-    assert!(firewall_errors[0].message.contains("docs/dev/setup.md"));
+    assert_eq!(errs.len(), 1);
+    assert!(errs[0]
+        .message
+        .contains("Managed governance documentation mirror"));
+    assert!(errs[0].message.contains("drifted from .docgov.lock"));
 }
 
 #[test]
@@ -115,22 +128,23 @@ fn test_lint_03_frontmatter_validation() {
     let engine = LintEngine::new(root).unwrap();
     let diagnostics = engine.run_lint(None).unwrap();
 
-    let adr_errors: Vec<_> = diagnostics
+    let adr_warnings: Vec<_> = diagnostics
         .iter()
         .filter(|d| d.rule_id == "INV-LINT-03")
         .collect();
 
-    assert_eq!(adr_errors.len(), 4);
-    assert!(adr_errors
+    assert_eq!(adr_warnings.len(), 4);
+    assert_eq!(adr_warnings[0].severity, docgov::Severity::Warning);
+    assert!(adr_warnings
         .iter()
         .any(|d| d.message.contains("Missing YAML frontmatter")));
-    assert!(adr_errors.iter().any(|d| d
+    assert!(adr_warnings.iter().any(|d| d
         .message
         .contains("Missing mandatory frontmatter field: 'id'")));
-    assert!(adr_errors
+    assert!(adr_warnings
         .iter()
         .any(|d| d.message.contains("Invalid status 'finished'")));
-    assert!(adr_errors.iter().any(|d| d
+    assert!(adr_warnings.iter().any(|d| d
         .message
         .contains("must provide a valid 'superseded_by' pointer")));
 }
@@ -148,7 +162,7 @@ fn test_lint_04_git_sync_trigger() {
 
     let root_path = std::path::PathBuf::from("/test");
 
-    // Case 1: src/api modified but docs/reference NOT modified -> Error
+    // Case 1: src/api modified but docs/reference NOT modified -> Warning (Advisory)
     let changed1 = vec![std::path::PathBuf::from("src/api/auth.rs")];
     let ctx1 = LintContext {
         workspace_root: &root_path,
@@ -160,6 +174,7 @@ fn test_lint_04_git_sync_trigger() {
     let diags1 = GitSyncTriggerRule.check(&ctx1).unwrap();
     assert_eq!(diags1.len(), 1);
     assert_eq!(diags1[0].rule_id, "INV-LINT-04");
+    assert_eq!(diags1[0].severity, docgov::Severity::Warning);
 
     // Case 2: src/api modified and docs/reference also modified -> Pass
     let changed2 = vec![
@@ -180,23 +195,23 @@ fn test_lint_04_git_sync_trigger() {
 #[test]
 fn test_render_formats() {
     let diag = docgov::Diagnostic::error(
-        "INV-LINT-02",
-        "Public doc links into internal dev",
-        "docs/tutorials/intro.md",
+        "INV-LINT-05",
+        "Managed directives block tampered",
+        "AGENTS.md",
     )
     .with_location(14, 5)
-    .with_snippet("[Dev](../dev/setup.md)")
-    .with_suggestion("Move concept to public doc");
+    .with_snippet("## Corrupted")
+    .with_suggestion("Run `docgov fix`");
 
     let gh = diag.render_github();
     assert_eq!(
         gh,
-        "::error file=docs/tutorials/intro.md,line=14,col=5,title=[INV-LINT-02]::Public doc links into internal dev"
+        "::error file=AGENTS.md,line=14,col=5,title=[INV-LINT-05]::Managed directives block tampered"
     );
 
     let term = diag.render_terminal();
-    assert!(term.contains("[INV-LINT-02]"));
-    assert!(term.contains("docs/tutorials/intro.md:14:5"));
+    assert!(term.contains("[INV-LINT-05]"));
+    assert!(term.contains("AGENTS.md:14:5"));
 }
 
 #[test]
@@ -273,8 +288,8 @@ fn test_patch_agent_directives_preserves_single_h1_and_existing_content() {
     );
     assert_eq!(h1_lines[0], "# My Custom Coding Assistant Guidelines");
 
-    // The inserted section must use secondary heading level (H2: '## Documentation Governance Directives')
-    assert!(patched.contains("## Documentation Governance Directives"));
+    // The inserted section must use secondary heading level (H2: '## Documentation Standards')
+    assert!(patched.contains("## Documentation Standards"));
 
     // Test idempotency: running again on patched text returns Unchanged
     let (reこと, action2) = patch_agent_directives(Some(&patched), SAMPLE_SNIPPET);
@@ -282,49 +297,39 @@ fn test_patch_agent_directives_preserves_single_h1_and_existing_content() {
     assert_eq!(reこと, patched);
 
     // Test update: modifying the interior of the marker block is cleanly updated
-    let mutated = patched.replace("### 1. Hard Constraints", "### 1. Outdated Invariants");
+    let mutated = patched.replace("1. **Taxonomy & Style**", "1. **Outdated Standards**");
     let (updated, action3) = patch_agent_directives(Some(&mutated), SAMPLE_SNIPPET);
     assert_eq!(action3, PatchAction::Updated);
-    assert!(updated.contains("### 1. Hard Constraints"));
-    assert!(!updated.contains("### 1. Outdated Invariants"));
+    assert!(updated.contains("1. **Taxonomy & Style**"));
+    assert!(!updated.contains("1. **Outdated Standards**"));
     assert!(updated.starts_with(original.trim_end()));
 
     // Test creation from None: creates pure snippet without redundant H1 header
     let (created, action4) = patch_agent_directives(None, SAMPLE_SNIPPET);
     assert_eq!(action4, PatchAction::Created);
     assert_eq!(created, format!("{}\n", SAMPLE_SNIPPET.trim()));
-    assert!(created.contains("## Documentation Governance Directives"));
+    assert!(created.contains("## Documentation Standards"));
 }
 
 #[test]
 fn test_patch_agent_directives_heals_stripped_delimiters() {
     // When an AI strips boundary comments but leaves or reorganizes the directives section
-    let corrupted = "# Agent Directives\n\n## Custom Project Rules\n- Some rule\n\n## Documentation Governance Directives\n\n### 1. Machine Invariants\n- Some corrupted content\n";
+    let corrupted = "# Agent Directives\n\n## Custom Project Rules\n- Some rule\n\n## Documentation Standards\n\n- Some corrupted content\n";
     let (healed, action) = patch_agent_directives(Some(corrupted), SAMPLE_SNIPPET);
     assert_eq!(action, PatchAction::Updated);
     assert!(healed.contains(DOCGOV_DIRECTIVES_BEGIN));
     assert!(healed.contains(DOCGOV_DIRECTIVES_END));
     assert!(healed.contains("## Custom Project Rules"));
-    // Must NOT contain duplicate "## Documentation Governance Directives"
-    assert_eq!(
-        healed
-            .matches("## Documentation Governance Directives")
-            .count(),
-        1
-    );
+    // Must NOT contain duplicate "## Documentation Standards"
+    assert_eq!(healed.matches("## Documentation Standards").count(), 1);
 
     // Also test when begin delimiter exists but closing delimiter was removed
-    let missing_end = "# Agent Directives\n\n<!-- BEGIN DOCGOV DIRECTIVES -->\n## Documentation Governance Directives\nCorrupted content without closing tag\n";
+    let missing_end = "# Agent Directives\n\n<!-- BEGIN DOCGOV DIRECTIVES -->\n## Documentation Standards\nCorrupted content without closing tag\n";
     let (healed2, action2) = patch_agent_directives(Some(missing_end), SAMPLE_SNIPPET);
     assert_eq!(action2, PatchAction::Updated);
     assert!(healed2.contains(DOCGOV_DIRECTIVES_BEGIN));
     assert!(healed2.contains(DOCGOV_DIRECTIVES_END));
-    assert_eq!(
-        healed2
-            .matches("## Documentation Governance Directives")
-            .count(),
-        1
-    );
+    assert_eq!(healed2.matches("## Documentation Standards").count(), 1);
 }
 
 #[test]
@@ -334,7 +339,7 @@ fn test_lint_05_detects_stripped_boundary_comments() {
 
     // AI stripped boundary comments but left directives content
     let content_without_delimiters =
-        "# Instructions\n\n## Documentation Governance Directives\nSome directives\n";
+        "# Instructions\n\n## Documentation Standards\nSome directives\n";
     fs::write(root.join("AGENTS.md"), content_without_delimiters).unwrap();
 
     let engine = LintEngine::new(root).unwrap();
@@ -383,12 +388,12 @@ fn test_lockfile_drift_detection() {
 
     let engine = LintEngine::new(root).unwrap();
     let diagnostics = engine.run_lint(None).unwrap();
-    let warnings: Vec<_> = diagnostics
+    let errors: Vec<_> = diagnostics
         .iter()
-        .filter(|d| d.rule_id == "INV-LINT-05" && d.severity == docgov::Severity::Warning)
+        .filter(|d| d.rule_id == "INV-LINT-05" && d.severity == docgov::Severity::Error)
         .collect();
-    assert_eq!(warnings.len(), 1);
-    assert!(warnings[0].message.contains("drifted from .docgov.lock"));
+    assert_eq!(errors.len(), 1);
+    assert!(errors[0].message.contains("drifted from .docgov.lock"));
 }
 
 #[test]
@@ -399,7 +404,7 @@ fn test_sync_governance_docs_atomic_prune() {
     // 0. Setup local specification fixture in workspace
     let spec_dir = root.join("spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
-    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
     fs::write(
         spec_dir.join("core/invariants.md"),
         "# Canonical Invariants\n",
@@ -429,12 +434,12 @@ fn test_sync_governance_docs_atomic_prune() {
         .sync_governance_docs(root, "docs/governance/documentation", true)
         .unwrap();
 
-    // 4. Verify canonical files were unpacked
-    assert!(root
-        .join("docs/governance/documentation/core/invariants.md")
-        .exists());
+    // 4. Verify canonical files were unpacked while internal invariants/workflows are cleanly excluded
     assert!(root
         .join("docs/governance/documentation/core/taxonomy.md")
+        .exists());
+    assert!(!root
+        .join("docs/governance/documentation/core/invariants.md")
         .exists());
 
     // 5. Verify the obsolete ghost file was completely pruned!
@@ -497,8 +502,13 @@ fn test_local_spec_sync_deterministic_hash_and_directives() {
     let spec_dir = root.join("spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
     let snippet_content = "<!-- BEGIN DOCGOV DIRECTIVES -->\n## Custom Local Directives\n<!-- END DOCGOV DIRECTIVES -->";
-    fs::write(spec_dir.join("directives.snippet"), snippet_content).unwrap();
-    fs::write(spec_dir.join("core/invariants.md"), "# Local Invariants\n").unwrap();
+    fs::write(spec_dir.join("default-agents.md"), snippet_content).unwrap();
+    fs::write(spec_dir.join("core/taxonomy.md"), "# Local Taxonomy\n").unwrap();
+    fs::write(
+        spec_dir.join("core/invariants.md"),
+        "# Internal Invariants\n",
+    )
+    .unwrap();
 
     let client = docgov::remote::RemoteClient::new(".", "local");
     let (fetched_snippet, source_info) = client.fetch_directives(Some(root)).unwrap();
@@ -512,15 +522,18 @@ fn test_local_spec_sync_deterministic_hash_and_directives() {
 
     // Verify documentation was created from local spec
     assert!(root
-        .join("docs/governance/documentation/core/invariants.md")
+        .join("docs/governance/documentation/core/taxonomy.md")
         .exists());
     assert_eq!(
-        fs::read_to_string(root.join("docs/governance/documentation/core/invariants.md")).unwrap(),
-        "# Local Invariants\n"
+        fs::read_to_string(root.join("docs/governance/documentation/core/taxonomy.md")).unwrap(),
+        "# Local Taxonomy\n"
     );
-    // Directives snippet must not leak into documentation mirror
+    // Internal invariants must not leak into documentation mirror
     assert!(!root
-        .join("docs/governance/documentation/directives.snippet")
+        .join("docs/governance/documentation/core/invariants.md")
+        .exists());
+    assert!(!root
+        .join("docs/governance/documentation/default-agents.md")
         .exists());
 }
 
@@ -819,7 +832,7 @@ fn test_update_check_mode_detects_newer_spec_via_local_upstream() {
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
     write_mock_spec_manifest(&spec_dir, "0.3.0");
-    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
     fs::write(spec_dir.join("core/invariants.md"), "# Inv\n").unwrap();
 
     let ws = root.join("workspace");
@@ -850,7 +863,7 @@ fn test_update_check_mode_reports_up_to_date_with_zero_exit() {
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
     write_mock_spec_manifest(&spec_dir, "0.1.0");
-    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
 
     let ws = root.join("workspace");
     fs::create_dir_all(&ws).unwrap();
@@ -873,7 +886,7 @@ fn test_update_dry_run_makes_no_changes() {
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
     write_mock_spec_manifest(&spec_dir, "0.4.0");
-    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
     fs::write(spec_dir.join("core/invariants.md"), "# Inv\n").unwrap();
 
     let ws = root.join("workspace");
@@ -903,8 +916,8 @@ fn test_update_end_to_end_applies_upgrade_and_refreshes_lock() {
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
     write_mock_spec_manifest(&spec_dir, "0.5.0");
-    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
-    fs::write(spec_dir.join("core/invariants.md"), "# New Invariants\n").unwrap();
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("core/taxonomy.md"), "# New Taxonomy\n").unwrap();
 
     let ws = root.join("workspace");
     fs::create_dir_all(&ws).unwrap();
@@ -949,7 +962,7 @@ fn test_update_explicit_target_version_argument() {
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
     write_mock_spec_manifest(&spec_dir, "0.9.0");
-    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
 
     let ws = root.join("workspace");
     fs::create_dir_all(&ws).unwrap();
@@ -976,7 +989,7 @@ fn test_update_refuses_unsupported_spec_major() {
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
     write_mock_spec_manifest(&spec_dir, "1.0.0");
-    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
 
     let ws = root.join("workspace");
     fs::create_dir_all(&ws).unwrap();
@@ -1007,7 +1020,7 @@ fn test_update_does_not_downgrade_without_force() {
     let spec_dir = root.join("docgov-spec");
     fs::create_dir_all(spec_dir.join("core")).unwrap();
     write_mock_spec_manifest(&spec_dir, "0.5.0");
-    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
 
     let ws = root.join("workspace");
     fs::create_dir_all(&ws).unwrap();
@@ -1264,8 +1277,14 @@ fn test_binary_json_format_emits_parseable_envelope() {
     let dir = tempdir().unwrap();
     let root = dir.path();
 
-    // An unapproved root Markdown file is a deterministic INV-LINT-01 violation.
+    // Advisory warning: unapproved root Markdown file (INV-LINT-01)
     fs::write(root.join("STRAY.md"), "# stray").unwrap();
+    // Blocking error: missing closing delimiter in managed agent directives (INV-LINT-05)
+    fs::write(
+        root.join("AGENTS.md"),
+        "<!-- BEGIN DOCGOV DIRECTIVES -->\n## Documentation Governance\n",
+    )
+    .unwrap();
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_docgov"))
         .arg("--path")
@@ -1274,7 +1293,7 @@ fn test_binary_json_format_emits_parseable_envelope() {
         .output()
         .expect("failed to run docgov");
 
-    // A violation means exit code 1, but stdout must still be valid JSON.
+    // A fatal managed error means exit code 1, but stdout must still be valid JSON.
     assert_eq!(output.status.code(), Some(1));
 
     let stdout = String::from_utf8(output.stdout).unwrap();
@@ -1287,11 +1306,17 @@ fn test_binary_json_format_emits_parseable_envelope() {
         docgov::config::Config::default().version
     );
     assert!(json["summary"]["errors"].as_u64().unwrap() >= 1);
+    assert!(json["summary"]["warnings"].as_u64().unwrap() >= 1);
     assert!(json["diagnostics"]
         .as_array()
         .unwrap()
         .iter()
-        .any(|d| d["rule_id"] == "INV-LINT-01" && d["severity"] == "Error"));
+        .any(|d| d["rule_id"] == "INV-LINT-01" && d["severity"] == "Warning"));
+    assert!(json["diagnostics"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|d| d["rule_id"] == "INV-LINT-05" && d["severity"] == "Error"));
 
     // Machine output must never carry decoration or timing chatter.
     assert!(
@@ -1322,7 +1347,7 @@ fn test_binary_color_never_strips_all_escapes() {
     let plain = run(&[]);
     assert!(!plain.contains('\x1b'), "escapes present: {plain:?}");
     assert!(plain.contains("[INV-LINT-01]"));
-    // The severity glyph must be present so findings stay scannable without color.
+    // The error severity glyph must be present so findings stay scannable without color.
     assert!(plain.contains('×'), "missing severity glyph: {plain:?}");
 }
 
@@ -1332,7 +1357,7 @@ fn test_delimiter_whitespace_tolerance() {
         extract_directives_block, find_begin_delimiter_span, find_end_delimiter_span,
     };
 
-    let sample_relaxed = "# Directives\n\n<!--   BEGIN DOCGOV DIRECTIVES   -->\n## Documentation Governance Directives\nContent here\n<!--   END DOCGOV DIRECTIVES   -->\n";
+    let sample_relaxed = "# Directives\n\n<!--   BEGIN DOCGOV DIRECTIVES   -->\n## Documentation Governance\nContent here\n<!--   END DOCGOV DIRECTIVES   -->\n";
     assert!(find_begin_delimiter_span(sample_relaxed).is_some());
     assert!(find_end_delimiter_span(sample_relaxed).is_some());
 
@@ -1352,7 +1377,7 @@ fn test_docgov_fix_command_repairs_directives() {
     let spec_dir = root.join("spec");
     fs::create_dir_all(&spec_dir).unwrap();
     write_mock_spec_manifest(&spec_dir, "0.0.3");
-    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
 
     let config = r#"version: "0.0.3"
 upstream:
@@ -1368,7 +1393,7 @@ agent_directives:
     fs::write(root.join(".docgov.yml"), config).unwrap();
 
     // Corrupted AGENTS.md missing end delimiter tag
-    let corrupted_agents = "# Project Instructions\n\n<!-- BEGIN DOCGOV DIRECTIVES -->\n## Documentation Governance Directives\nCorrupted content without closing delimiter\n";
+    let corrupted_agents = "# Project Instructions\n\n<!-- BEGIN DOCGOV DIRECTIVES -->\n## Documentation Governance\nCorrupted content without closing delimiter\n";
     fs::write(root.join("AGENTS.md"), corrupted_agents).unwrap();
 
     // Running check initially fails
@@ -1408,7 +1433,7 @@ fn test_docgov_yml_sole_declarative_source_of_truth() {
     let spec_dir = root.join("spec");
     fs::create_dir_all(&spec_dir).unwrap();
     write_mock_spec_manifest(&spec_dir, "0.0.3");
-    fs::write(spec_dir.join("directives.snippet"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
 
     // .docgov.yml declares v0.0.3
     let config = r#"version: "0.0.3"
@@ -1458,6 +1483,12 @@ fn test_binary_init_defaults_to_latest_spec() {
     let dir = tempdir().unwrap();
     let root = dir.path();
 
+    let spec_dir = root.join("spec");
+    fs::create_dir_all(spec_dir.join("core")).unwrap();
+    write_mock_spec_manifest(&spec_dir, "0.0.4");
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("core/invariants.md"), "# Invariants\n").unwrap();
+
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_docgov"))
         .arg("--path")
         .arg(root)
@@ -1501,6 +1532,12 @@ fn test_binary_init_defaults_to_latest_spec() {
 fn test_binary_init_with_explicit_target_flag() {
     let dir = tempdir().unwrap();
     let root = dir.path();
+
+    let spec_dir = root.join("spec");
+    fs::create_dir_all(spec_dir.join("core")).unwrap();
+    write_mock_spec_manifest(&spec_dir, "0.0.4");
+    fs::write(spec_dir.join("default-agents.md"), SAMPLE_SNIPPET).unwrap();
+    fs::write(spec_dir.join("core/invariants.md"), "# Invariants\n").unwrap();
 
     let output = std::process::Command::new(env!("CARGO_BIN_EXE_docgov"))
         .arg("--path")

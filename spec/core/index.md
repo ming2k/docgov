@@ -1,25 +1,23 @@
 # Documentation Governance Core
 
-Universal documentation governance standard and verification protocol for software engineering repositories.
+Universal documentation governance standards and architectural guidelines for software engineering repositories.
 
 ---
 
-## The Four Core Primitives
+## Core Documentation Standards
 
-Documentation governance is organized around four orthogonal primitives:
+Documentation governance is organized around two foundational standards and domain capability profiles:
 
-| Core Document | Primitive | Description |
+| Core Document | Standard | Description |
 | :--- | :--- | :--- |
-| [Taxonomy](taxonomy.md) | **Governance Coordinates** | 4-Dimensional system: Temperature, Lifecycle, Audience Isolation, Diátaxis |
-| [Invariants](invariants.md) | **Rule Constitution** | Deterministic AST rules (`INV-LINT`) and Agent cognitive protocols (`INV-AGENT`) |
-| [Workflow](workflow.md) | **Operational Lifecycle** | Code-to-doc trigger matrix, PR review gates, and zero-vendoring adoption |
+| [Taxonomy](taxonomy.md) | **Governance Coordinates** | 4-Dimensional system: Temperature, Lifecycle, Audience Layering, Diátaxis |
 | [Style Guide](style.md) | **Syntax & Formatting** | Voice, capitalization, heading hierarchy, relative links, and document patterns |
 
 ---
 
 ## Domain Capability Profiles
 
-Repositories activate domain capabilities declared in `.docgov.yml`. Each profile provides vertical entities:
+Repositories activate domain capabilities declared in `.docgov.yml`. Each profile provides vertical entities and authoritative templates:
 
 | Domain Profile | Focus | Vertical Entities | Location |
 | :--- | :--- | :--- | :--- |
@@ -31,8 +29,6 @@ Repositories activate domain capabilities declared in `.docgov.yml`. Each profil
 
 ## Quick Navigation
 
-1. **Adopting governance**: Consult [Workflow: Zero-Vendoring Adoption](workflow.md#3-zero-vendoring-repository-adoption).
-2. **Deciding where content lives**: Consult [Taxonomy](taxonomy.md).
-3. **Checking hard rules**: Review the codified [Invariants](invariants.md).
-4. **Reviewing a Pull Request**: Follow [Workflow: PR Review Gates](workflow.md#2-pull-request-review-gates).
-5. **Evaluating code change impact**: Check [Workflow: Trigger Matrix](workflow.md#1-code-to-documentation-trigger-matrix).
+1. **Deciding where content lives**: Consult [Taxonomy](taxonomy.md).
+2. **Formatting and technical voice**: Review the [Style Guide](style.md).
+3. **Drafting an ADR**: Follow [Architectural Decision Records](profiles/architecture/adr.md).

@@ -37,9 +37,9 @@ jobs:
 
       - name: Verify Spec Structure
         run: |
-          test -f spec/.manifest.json
-          test -f spec/directives.snippet
+          test -f spec/default-agents.md
+          test -f spec/default-config.yml
           test -d spec/core
           test -d spec/profiles
-          grep -q '"protocol_version":' spec/.manifest.json
+          grep -q 'version:' spec/default-config.yml
           echo "Specification assets successfully verified."

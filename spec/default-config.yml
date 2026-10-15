@@ -21,17 +21,6 @@ root_sanitization:
     - "LICENSE.md"
     - "SECURITY.md"
 
-# [INV-LINT-02] Contributor Firewall Bindings
-firewall:
-  enforce: true
-  public_surfaces:
-    - "docs/tutorials/**"
-    - "docs/how-to/**"
-    - "docs/reference/**"
-    - "docs/explanation/**"
-  internal_surfaces:
-    - "docs/dev/**"
-
 # [INV-LINT-03] Architecture & Metadata Profile
 architecture:
   enforce: true

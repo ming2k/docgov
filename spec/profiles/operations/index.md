@@ -43,13 +43,12 @@ Operational knowledge flows upward through three distinct layers:
 
 When the `operations` profile is active, the repository establishes:
 
-| Surface | Path | Required | Firewall Boundary | Purpose |
+| Surface | Path | Required | Scope | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
-| **Incident Reviews** | `docs/dev/postmortems/` | Yes | Internal (`[INV-LINT-02]`) | Archived blameless post-incident reviews |
+| **Incident Reviews** | `docs/dev/postmortems/` | Yes | Internal | Archived blameless post-incident reviews |
 
 ---
 
 ## Invariant Governance
 
 - **`[INV-AGENT-03]` Blameless Postmortem Structure**: Post-incident reviews must focus strictly on timeline reconstruction, detection gaps, and systemic defense failures. Personal human blame is strictly prohibited.
-- **`[INV-LINT-02]` Contributor Firewall**: Postmortems reside in `docs/dev/` behind the contributor firewall; public user-facing guides must never link directly into postmortems.

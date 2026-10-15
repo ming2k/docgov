@@ -22,36 +22,10 @@ The repository is structured as a monorepo:
 - **Verification**: Run `cargo test --workspace` and `cargo clippy --workspace --all-targets -- -D warnings` before completing code changes.
 
 <!-- BEGIN DOCGOV DIRECTIVES -->
-<!-- CRITICAL: MANAGED BY DOCGOV. DO NOT MODIFY, MOVE, OR REMOVE DELIMITER TAGS. -->
-## Documentation Governance Directives <!-- @docgov-anchor -->
+<!-- MANAGED BY DOCGOV: DO NOT EDIT THIS BLOCK OR ITS DELIMITERS. -->
+## Documentation Standards <!-- @docgov-anchor -->
 
-All modifications must adhere to repository invariants and pass `docgov check`.
-
-### 1. Hard Constraints (Zero-Tolerance Invariants)
-- `[INV-LINT-01] Root Whitelist`: Never create arbitrary Markdown files at the repository root. Only whitelisted files (`README.md`, `CHANGELOG.md`, `CONTRIBUTING.md`, `AGENTS.md`, `LICENSE.md`, `SECURITY.md`) are allowed.
-- `[INV-LINT-02] Scope Boundary`: Public documentation (`docs/{tutorials,how-to,reference,explanation}/`) MUST NEVER link to internal contributor docs (`docs/dev/**`).
-- `[INV-LINT-03] Frontmatter Schema`: Every ADR in `docs/adr/` must declare valid YAML frontmatter (`id`, `title`, `status`, `date`).
-- `[INV-LINT-04] Code-Doc Sync`: Modifying monitored paths in `src/` requires updating corresponding `docs/` in the same change.
-- `[INV-LINT-05] Directives Integrity`: Never remove, reformat, or strip boundary delimiters (`<!-- BEGIN/END DOCGOV DIRECTIVES -->`) when modifying agent configuration files.
-
-### 2. Architectural Decision Standards (Reasoning Principles)
-- `[INV-AGENT-01] Rejected Alternatives`: Every new ADR MUST document discarded options and their specific failure modes.
-- `[INV-AGENT-02] Historical State Routing`:
-  - New implementations: DO NOT use `superseded` or `rejected` ADRs as active patterns.
-  - Refactoring & investigations: MUST inspect `superseded` ADRs to learn from historical failure modes.
-- `[INV-AGENT-03] Blameless Postmortems`: Incident postmortems must focus strictly on timeline, detection gaps, and systemic defense failures, prohibiting personal human blame.
-- `[INV-AGENT-04] Architectural Significance Threshold`: Only author ADRs for decisions with high reversal cost or cross-boundary blast radius (skip localized or trivial refactorings).
-
-### 3. Reference Specifications (Authoritative Standards)
-Before drafting or restructuring documentation, inspect the local governance specifications:
-- Taxonomy & Layout (Diátaxis): `docs/governance/documentation/core/taxonomy.md`
-- System Invariants: `docs/governance/documentation/core/invariants.md`
-- Style & Hyperlink Rules: `docs/governance/documentation/core/style.md`
-- ADR & RFC Standards: `docs/governance/documentation/profiles/architecture/adr.md`
-- Quality & Verification: `docs/governance/documentation/profiles/validation/testing.md`
-
-### 4. Verification & Advisory Gate (On-Demand / Lazy)
-`docgov` is an on-demand verification tool, not an unconditional mandatory step for every turn. Apply a lazy strategy:
-- **Skip (No-op)**: Pure discussions, architecture Q&A, intermediate edits, or internal code changes that do not touch documentation or governance boundaries.
-- **Run (Targeted Verification)**: Execute `docgov check` before final hand-off only when modifying `docs/`, `spec/`, ADRs (`docs/adr/`), or files affecting code-doc sync (`[INV-LINT-04]`). Prioritize static self-review over blind tool invocation.
+When creating or modifying documentation or architectural records:
+1. **Taxonomy & Style**: Follow `docs/governance/documentation/core/taxonomy.md` for document categorization (Diátaxis) and `docs/governance/documentation/core/style.md` for technical writing voice.
+2. **Architecture Decisions (`docs/adr/`)**: Author ADRs only for high-impact architectural changes (skip trivial refactorings). Follow `docs/governance/documentation/profiles/architecture/adr.md`, document rejected alternatives, and never revive superseded patterns.
 <!-- END DOCGOV DIRECTIVES -->

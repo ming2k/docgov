@@ -22,9 +22,8 @@ docgov/
 │   │   └── ...
 │   └── tests/                  # Integration test suites
 └── spec/                       # Sovereign specification standard
-    ├── .manifest.json          # Protocol version metadata and SHA-256 asset catalog
-    ├── default-config.yml      # Canonical adoption configuration template
-    ├── directives.snippet      # Canonical AI agent directives block
+    ├── default-config.yml      # Canonical .docgov.yml adoption template
+    ├── default-agents.md       # Canonical AGENTS.md governance block template
     ├── core/                   # Core governance specification
     │   ├── taxonomy.md         # Multi-dimensional governance coordinates
     │   ├── invariants.md       # Codified system invariants ([INV-*])
@@ -45,7 +44,7 @@ docgov/
 | Component | Tag Pattern | Target Artifacts | Description |
 |---|---|---|---|
 | **CLI** | `vx.x.x` | Multi-arch binaries (`docgov`), crates.io | High-performance verification and sync CLI |
-| **Spec** | `spec-vx.x.x` | `docgov-spec-*.tar.gz`, `directives.snippet` | Sovereign documentation governance standard |
+| **Spec** | `spec-vx.x.x` | `docgov-spec-*.tar.gz`, `default-agents.md`, `default-config.yml` | Sovereign documentation governance standard |
 
 Release workflows are automated via GitHub Actions in `.github/workflows/`:
 * Pushing a `v*` tag triggers cross-compilation and publishes binaries (`x86_64-linux`, `musl`, `macOS arm64/x86_64`, `Windows`).

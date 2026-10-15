@@ -7,7 +7,6 @@ use crate::config::Config;
 use crate::diagnostics::Diagnostic;
 
 pub mod lint_01_root;
-pub mod lint_02_firewall;
 pub mod lint_03_frontmatter;
 pub mod lint_04_trigger;
 pub mod lint_05_agent_directives;
@@ -29,7 +28,6 @@ pub trait Rule: Send + Sync {
 pub fn all_rules() -> Vec<Box<dyn Rule>> {
     vec![
         Box::new(lint_01_root::RootSanitizerRule),
-        Box::new(lint_02_firewall::FirewallRule),
         Box::new(lint_03_frontmatter::FrontmatterSchemaRule),
         Box::new(lint_04_trigger::GitSyncTriggerRule),
         Box::new(lint_05_agent_directives::AgentDirectivesRule),
